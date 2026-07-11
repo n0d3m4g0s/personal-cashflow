@@ -162,11 +162,19 @@ export function monthlyFactor(schedule) {
 
 // ---------- Кредитки ----------
 
+// Актуальный долг карты (в рублях): сумма выписки, если она > 0, иначе текущий долг.
+// statementBalance в проде — всегда объект (в т.ч. {amount:0}), поэтому нельзя писать
+// `statementBalance || currentDebt` — пустой объект truthy и дал бы долг 0.
+export function cardDebt(card, rates) {
+  const sb = card.statementBalance
+  const hasStatement = sb && (Number(sb.amount) || 0) > 0
+  return moneyToRub(hasStatement ? sb : card.currentDebt, rates)
+}
+
 // Обязательный (минимальный) платёж по карте (в рублях) по формуле банка:
 // max(база×%, fixed) + (plusInterest ? проценты : 0), но не больше долга.
 export function cardMinPayment(card, rates) {
-  const hasStatement = card.statementBalance && (Number(card.statementBalance.amount) || 0) > 0
-  const debt = moneyToRub(hasStatement ? card.statementBalance : card.currentDebt, rates)
+  const debt = cardDebt(card, rates)
   const base = card.minPaymentBase === 'statement'
     ? moneyToRub(card.statementBalance, rates)
     : moneyToRub(card.currentDebt, rates)
@@ -283,15 +291,16 @@ export function buildForecast(state, opts = {}) {
   // Кредитки (−) — ОДНО ближайшее обязательство на карту (снимок текущего долга).
   for (const card of state.cards || []) {
     if (card.disabled) continue
-    const debt = moneyToRub(card.statementBalance || card.currentDebt, rates)
+    const debt = cardDebt(card, rates)
     if (debt <= 0) continue
-    const { statement, due } = cardNextDue(card, start)
+    const { statement, due, graceEnd } = cardCycle(card, start)
     const full = card.payStrategy !== 'minimum'
     const amount = full ? debt : cardMinPayment(card, rates)
     add(due, -amount, 'card', `${card.name} (${full ? 'полное' : 'минимум'})`, {
       owner: card.owner,
       bank: card.bank,
       statementDate: statement,
+      graceDate: graceEnd,
       strategy: full ? 'full' : 'minimum',
       minPayment: cardMinPayment(card, rates),
       fullPayment: debt,

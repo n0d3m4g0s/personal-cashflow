@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt,
 } from '../src/finance.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
@@ -192,4 +192,41 @@ test('cardMinPayment: не больше долга', () => {
   }
   // max(70, 600) = 600, но долг 500 → кламп до 500
   assert.equal(cardMinPayment(card, rates), 500)
+})
+
+test('cardDebt: statementBalance=0 → берёт currentDebt (корень бага прогноза)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    statementBalance: { amount: 0, currency: 'RUB' },
+    currentDebt: { amount: 39400, currency: 'RUB' },
+  }
+  assert.equal(cardDebt(card, rates), 39400)
+})
+
+test('cardDebt: statementBalance>0 → берёт его (приоритет выписки)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    statementBalance: { amount: 20000, currency: 'RUB' },
+    currentDebt: { amount: 39400, currency: 'RUB' },
+  }
+  assert.equal(cardDebt(card, rates), 20000)
+})
+
+test('buildForecast: карта с нулевой выпиской и долгом попадает в события (регрессия бага)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Озон', bank: 'Озон', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+      currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' },
+      minPaymentPlusInterest: true, apr: 0.624,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.ok(cardEvents.length >= 1, 'карта с нулевой выпиской, но ненулевым долгом должна попасть в прогноз')
+  assert.equal(fmtISO(cardEvents[0].date), '2026-08-24')
+  assert.ok(cardEvents[0].graceDate, 'событие карты должно нести дату конца грейса')
 })
