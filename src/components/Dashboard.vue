@@ -33,7 +33,7 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
       <div class="card stat">
         <div class="muted small">Обязательные расходы</div>
         <div class="big neg mono">{{ money(monthly.obligatory) }}</div>
-        <div class="small muted">расходы {{ money(monthly.expense) }} + кредиты {{ money(monthly.loan) }}</div>
+        <div class="small muted">расходы {{ money(monthly.expense) }} + кредиты {{ money(monthly.loan) }} + карты {{ money(monthly.card) }}</div>
       </div>
       <div class="card stat">
         <div class="muted small">Остаётся в месяц</div>
