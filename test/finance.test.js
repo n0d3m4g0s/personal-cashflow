@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment,
 } from '../src/finance.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
@@ -139,4 +139,57 @@ test('cardCycle: якорный день клампится к концу кор
   const { statement } = cardCycle(card, parseDate('2026-02-27'))
   assert.equal(statement.getMonth(), 1) // февраль
   assert.equal(statement.getDate(), 28)
+})
+
+test('cardMinPayment: Т-Банк 14% от долга, минимум 600', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 231684, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // 231684 × 0.14 = 32435.76, проценты не добавляются
+  assert.ok(Math.abs(cardMinPayment(card, rates) - 32435.76) < 0.5)
+})
+
+test('cardMinPayment: минимум-фикс срабатывает на малом долге', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 1000, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // max(140, 600) = 600
+  assert.equal(cardMinPayment(card, rates), 600)
+})
+
+test('cardMinPayment: Озон 4% + проценты, минимум 400', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 39400, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 400, currency: 'RUB' },
+    minPaymentPlusInterest: true, apr: 0.624, statementCycleDays: 30,
+  }
+  // core = max(1576, 400) = 1576; проценты = 39400×0.624×30/365 ≈ 2020.6; итого ≈ 3596.6
+  const interest = 39400 * 0.624 * 30 / 365
+  assert.ok(Math.abs(cardMinPayment(card, rates) - (1576 + interest)) < 1)
+})
+
+test('cardMinPayment: не больше долга', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 500, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // max(70, 600) = 600, но долг 500 → кламп до 500
+  assert.equal(cardMinPayment(card, rates), 500)
 })

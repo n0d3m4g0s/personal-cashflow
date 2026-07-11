@@ -162,14 +162,25 @@ export function monthlyFactor(schedule) {
 
 // ---------- Кредитки ----------
 
-// Минимальный платёж по карте (в рублях).
+// Обязательный (минимальный) платёж по карте (в рублях) по формуле банка:
+// max(база×%, fixed) + (plusInterest ? проценты : 0), но не больше долга.
 export function cardMinPayment(card, rates) {
-  const base = moneyToRub(card.statementBalance || card.currentDebt, rates)
+  const hasStatement = card.statementBalance && (Number(card.statementBalance.amount) || 0) > 0
+  const debt = moneyToRub(hasStatement ? card.statementBalance : card.currentDebt, rates)
+  const base = card.minPaymentBase === 'statement'
+    ? moneyToRub(card.statementBalance, rates)
+    : moneyToRub(card.currentDebt, rates)
   const pct = (Number(card.minPaymentPercent) || 0) / 100
   const byPct = base * pct
   const fixed = moneyToRub(card.minPaymentFixed, rates)
-  const min = Math.max(byPct, fixed)
-  return Math.min(min, base) // не больше долга
+  const core = Math.max(byPct, fixed)
+  let interest = 0
+  if (card.minPaymentPlusInterest) {
+    const apr = Number(card.apr) || 0
+    const days = Number(card.statementCycleDays) || 30
+    interest = debt * apr * days / 365
+  }
+  return Math.min(core + interest, debt)
 }
 
 // Актуальный на дату `from` цикл карты: { statement, due, graceEnd }.
