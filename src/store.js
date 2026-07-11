@@ -2,6 +2,7 @@
 import { reactive, watch } from 'vue'
 import { makeSeed } from './seed.js'
 import { DEFAULT_RATES } from './money.js'
+import { cardNextDue, fmtISO, addDays, today } from './finance.js'
 
 const STORAGE_KEY = 'family-finance:v1'
 
@@ -20,6 +21,31 @@ function load() {
   return makeSeed()
 }
 
+// Приводит карту к новой модели: явные даты цикла + дефолты новых полей.
+// Идемпотентна: если statementDate уже есть, даты не трогает.
+export function migrateCard(card, from = today()) {
+  const c = { ...card }
+  if (!c.statementDate) {
+    // синтез из старых statementDay/dueDay на ближайший цикл
+    const { statement, due } = cardNextDue(
+      { statementDay: c.statementDay, dueDay: c.dueDay },
+      from,
+    )
+    c.statementDate = fmtISO(statement)
+    c.dueDate = fmtISO(due)
+    const grace = Number(c.gracePeriodDays) || 0
+    c.graceEndDate = grace > 0 ? fmtISO(addDays(statement, grace)) : c.dueDate
+  }
+  if (c.statementCycleDays == null) c.statementCycleDays = 30
+  if (c.minPaymentBase == null) c.minPaymentBase = 'currentDebt'
+  if (c.minPaymentPlusInterest == null) c.minPaymentPlusInterest = false
+  if (c.apr == null) c.apr = 0
+  if (c.minPaymentFixed == null) c.minPaymentFixed = { amount: 0, currency: 'RUB' }
+  if (c.transferLimit == null) c.transferLimit = { amount: 0, currency: 'RUB' }
+  if (c.transferGraceDays == null) c.transferGraceDays = Number(c.gracePeriodDays) || 0
+  return c
+}
+
 // Гарантируем наличие ключевых полей (на случай старых сохранений).
 function migrate(s) {
   s.settings = s.settings || {}
@@ -31,6 +57,7 @@ function migrate(s) {
   for (const k of ['incomes', 'expenses', 'loans', 'cards', 'goals']) {
     if (!Array.isArray(s[k])) s[k] = []
   }
+  s.cards = (s.cards || []).map((c) => migrateCard(c))
   return s
 }
 

@@ -162,26 +162,75 @@ export function monthlyFactor(schedule) {
 
 // ---------- Кредитки ----------
 
-// Минимальный платёж по карте (в рублях).
+// Актуальный долг карты (в рублях): сумма выписки, если она > 0, иначе текущий долг.
+// statementBalance в проде — всегда объект (в т.ч. {amount:0}), поэтому нельзя писать
+// `statementBalance || currentDebt` — пустой объект truthy и дал бы долг 0.
+export function cardDebt(card, rates) {
+  const sb = card.statementBalance
+  const hasStatement = sb && (Number(sb.amount) || 0) > 0
+  return moneyToRub(hasStatement ? sb : card.currentDebt, rates)
+}
+
+// Обязательный (минимальный) платёж по карте (в рублях) по формуле банка:
+// max(база×%, fixed) + (plusInterest ? проценты : 0), но не больше долга.
 export function cardMinPayment(card, rates) {
-  const base = moneyToRub(card.statementBalance || card.currentDebt, rates)
+  const debt = cardDebt(card, rates)
+  const base = card.minPaymentBase === 'statement'
+    ? moneyToRub(card.statementBalance, rates)
+    : moneyToRub(card.currentDebt, rates)
   const pct = (Number(card.minPaymentPercent) || 0) / 100
   const byPct = base * pct
   const fixed = moneyToRub(card.minPaymentFixed, rates)
-  const min = Math.max(byPct, fixed)
-  return Math.min(min, base) // не больше долга
+  const core = Math.max(byPct, fixed)
+  let interest = 0
+  if (card.minPaymentPlusInterest) {
+    const apr = Number(card.apr) || 0
+    const days = Number(card.statementCycleDays) || 30
+    interest = debt * apr * days / 365
+  }
+  return Math.min(core + interest, debt)
 }
 
-// Дата ближайшего платежа по карте: первый день `dueDay` СТРОГО после выписки.
+// Актуальный на дату `from` цикл карты: { statement, due, graceEnd }.
+// Хранимые даты — ISO ближайшего/последнего цикла; если он в прошлом, катим вперёд,
+// сохраняя якорный день выписки и постоянные смещения due/graceEnd (в днях).
+export function cardCycle(card, from = today()) {
+  const stmt0 = parseDate(card.statementDate)
+  const due0 = parseDate(card.dueDate) || stmt0
+  const grace0 = parseDate(card.graceEndDate) || due0
+  if (!stmt0) {
+    // нет данных — деградируем к сегодняшнему дню
+    return { statement: from, due: from, graceEnd: from }
+  }
+  const dueOffset = diffDays(due0, stmt0)     // дней от выписки до платежа
+  const graceOffset = diffDays(grace0, stmt0) // дней от выписки до конца грейса
+  const anchorDay = stmt0.getDate()
+  const stepMonths = Math.max(1, Math.round((Number(card.statementCycleDays) || 30) / 30))
+
+  let statement = stmt0
+  let due = due0
+  let guard = 0
+  while (due < from && guard < 600) {
+    guard++
+    statement = addMonths(stmt0, guard * stepMonths, anchorDay)
+    due = addDays(statement, dueOffset)
+  }
+  const graceEnd = addDays(statement, graceOffset)
+  return { statement, due, graceEnd }
+}
+
+// Дата ближайшего платежа по карте. Новая модель — явные даты (через cardCycle);
+// старая модель (statementDay/dueDay) — для обратной совместимости до миграции.
 export function cardNextDue(card, from = today()) {
+  if (card.statementDate) {
+    const { statement, due } = cardCycle(card, from)
+    return { statement, due }
+  }
   const stmtDay = Number(card.statementDay) || 1
   const dueDay = Number(card.dueDay) || stmtDay
-  // Находим последнюю прошедшую (или ближайшую) выписку и следующий dueDay после неё,
-  // но не раньше сегодняшнего дня.
   for (let offset = -1; offset < 14; offset++) {
     const base = addMonths(from, offset, 1)
     const stmt = clampDayToMonth(base.getFullYear(), base.getMonth(), stmtDay)
-    // следующий dueDay строго после выписки
     let due = clampDayToMonth(stmt.getFullYear(), stmt.getMonth(), dueDay)
     if (due <= stmt) due = clampDayToMonth(stmt.getFullYear(), stmt.getMonth() + 1, dueDay)
     if (due >= from) return { statement: stmt, due }
@@ -242,15 +291,16 @@ export function buildForecast(state, opts = {}) {
   // Кредитки (−) — ОДНО ближайшее обязательство на карту (снимок текущего долга).
   for (const card of state.cards || []) {
     if (card.disabled) continue
-    const debt = moneyToRub(card.statementBalance || card.currentDebt, rates)
+    const debt = cardDebt(card, rates)
     if (debt <= 0) continue
-    const { statement, due } = cardNextDue(card, start)
+    const { statement, due, graceEnd } = cardCycle(card, start)
     const full = card.payStrategy !== 'minimum'
     const amount = full ? debt : cardMinPayment(card, rates)
     add(due, -amount, 'card', `${card.name} (${full ? 'полное' : 'минимум'})`, {
       owner: card.owner,
       bank: card.bank,
       statementDate: statement,
+      graceDate: graceEnd,
       strategy: full ? 'full' : 'minimum',
       minPayment: cardMinPayment(card, rates),
       fullPayment: debt,
@@ -320,11 +370,18 @@ export function buildMonthly(state, rates, start = today(), horizonMonths = 6) {
     if (loan.disabled) continue
     loanM += moneyToRub(loan, rates)
   }
-  const obligatory = expenseM + loanM
+  let cardM = 0
+  for (const card of state.cards || []) {
+    if (card.disabled) continue
+    if (cardDebt(card, rates) <= 0) continue
+    cardM += cardMinPayment(card, rates)
+  }
+  const obligatory = expenseM + loanM + cardM
   return {
     income: incomeM,
     expense: expenseM,
     loan: loanM,
+    card: cardM,
     obligatory,
     surplus: incomeM - obligatory,
   }

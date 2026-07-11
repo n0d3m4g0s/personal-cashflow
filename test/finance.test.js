@@ -3,8 +3,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt, buildMonthly,
 } from '../src/finance.js'
+import { migrateCard } from '../src/store.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
   const s = { frequency: 'monthly', interval: 1, startDate: '2026-01-15', endDate: null }
@@ -59,6 +60,16 @@ test('cardNextDue: due после выписки, не в прошлом', () =>
   assert.ok(due > statement)
 })
 
+test('cardNextDue: работает с явными датами через cardCycle', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  const { statement, due } = cardNextDue(card, parseDate('2026-07-12'))
+  assert.equal(fmtISO(statement), '2026-07-26')
+  assert.equal(fmtISO(due), '2026-08-19')
+})
+
 test('buildForecast: считает нарастающий остаток и алерты', () => {
   const state = {
     settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0118 }, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 3 },
@@ -85,4 +96,187 @@ test('computeGoals: ETA по профициту', () => {
   const g = computeGoals(state)
   assert.equal(g.surplus, 100000)
   assert.equal(g.results[0].monthsNeeded, 3) // 300k / 100k
+})
+
+test('cardCycle: возвращает сохранённый цикл, если он ещё актуален', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  const { statement, due, graceEnd } = cardCycle(card, parseDate('2026-07-12'))
+  assert.equal(fmtISO(statement), '2026-07-26')
+  assert.equal(fmtISO(due), '2026-08-19')
+  assert.equal(fmtISO(graceEnd), '2026-08-19')
+})
+
+test('cardCycle: катит цикл вперёд, если он в прошлом', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  // from после due первого цикла → ожидаем следующий цикл (выписка 26 августа)
+  const { statement, due } = cardCycle(card, parseDate('2026-08-20'))
+  assert.equal(statement.getMonth(), 7) // август (0-based)
+  assert.equal(statement.getDate(), 26)
+  assert.ok(due >= parseDate('2026-08-20'))
+})
+
+test('cardCycle: сохраняет смещение due и graceEnd от выписки', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19', // +24 дня
+    graceEndDate: '2026-09-08', statementCycleDays: 30, // +44 дня
+  }
+  const { statement, due, graceEnd } = cardCycle(card, parseDate('2026-09-01'))
+  assert.equal(diffDays(due, statement), 24)
+  assert.equal(diffDays(graceEnd, statement), 44)
+})
+
+test('cardCycle: якорный день клампится к концу короткого месяца', () => {
+  const card = {
+    statementDate: '2026-01-31', dueDate: '2026-02-20',
+    graceEndDate: '2026-02-20', statementCycleDays: 30,
+  }
+  // прокрутка в февраль: 31 → 28
+  const { statement } = cardCycle(card, parseDate('2026-02-27'))
+  assert.equal(statement.getMonth(), 1) // февраль
+  assert.equal(statement.getDate(), 28)
+})
+
+test('cardMinPayment: Т-Банк 14% от долга, минимум 600', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 231684, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // 231684 × 0.14 = 32435.76, проценты не добавляются
+  assert.ok(Math.abs(cardMinPayment(card, rates) - 32435.76) < 0.5)
+})
+
+test('cardMinPayment: минимум-фикс срабатывает на малом долге', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 1000, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // max(140, 600) = 600
+  assert.equal(cardMinPayment(card, rates), 600)
+})
+
+test('cardMinPayment: Озон 4% + проценты, минимум 400', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 39400, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 400, currency: 'RUB' },
+    minPaymentPlusInterest: true, apr: 0.624, statementCycleDays: 30,
+  }
+  // core = max(1576, 400) = 1576; проценты = 39400×0.624×30/365 ≈ 2020.6; итого ≈ 3596.6
+  const interest = 39400 * 0.624 * 30 / 365
+  assert.ok(Math.abs(cardMinPayment(card, rates) - (1576 + interest)) < 1)
+})
+
+test('cardMinPayment: не больше долга', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 500, currency: 'RUB' },
+    statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 14, minPaymentBase: 'currentDebt',
+    minPaymentFixed: { amount: 600, currency: 'RUB' },
+    minPaymentPlusInterest: false, apr: 0.619, statementCycleDays: 30,
+  }
+  // max(70, 600) = 600, но долг 500 → кламп до 500
+  assert.equal(cardMinPayment(card, rates), 500)
+})
+
+test('cardDebt: statementBalance=0 → берёт currentDebt (корень бага прогноза)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    statementBalance: { amount: 0, currency: 'RUB' },
+    currentDebt: { amount: 39400, currency: 'RUB' },
+  }
+  assert.equal(cardDebt(card, rates), 39400)
+})
+
+test('cardDebt: statementBalance>0 → берёт его (приоритет выписки)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    statementBalance: { amount: 20000, currency: 'RUB' },
+    currentDebt: { amount: 39400, currency: 'RUB' },
+  }
+  assert.equal(cardDebt(card, rates), 20000)
+})
+
+test('buildForecast: карта с нулевой выпиской и долгом попадает в события (регрессия бага)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Озон', bank: 'Озон', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+      currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' },
+      minPaymentPlusInterest: true, apr: 0.624,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.ok(cardEvents.length >= 1, 'карта с нулевой выпиской, но ненулевым долгом должна попасть в прогноз')
+  assert.equal(fmtISO(cardEvents[0].date), '2026-08-24')
+  assert.ok(cardEvents[0].graceDate, 'событие карты должно нести дату конца грейса')
+})
+
+test('buildMonthly: минимальные платежи карт входят в обязательства', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = {
+    settings: { rates },
+    incomes: [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }],
+    expenses: [],
+    loans: [],
+    cards: [{
+      name: 'Т', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-07-26', dueDate: '2026-08-19', graceEndDate: '2026-08-19', statementCycleDays: 30,
+      currentDebt: { amount: 100000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 14, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 600, currency: 'RUB' },
+      minPaymentPlusInterest: false, apr: 0.619,
+    }],
+    goals: [],
+  }
+  const m = buildMonthly(state, rates)
+  // минплатёж = 100000 × 0.14 = 14000
+  assert.ok(Math.abs(m.card - 14000) < 1)
+  assert.ok(Math.abs(m.obligatory - 14000) < 1) // нет expenses/loans
+  assert.ok(Math.abs(m.surplus - (300000 - 14000)) < 1)
+})
+
+test('migrateCard: синтезирует даты из старой модели', () => {
+  const old = {
+    name: 'Старая', statementDay: 5, dueDay: 25, gracePeriodDays: 55,
+    currentDebt: { amount: 10000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+  }
+  const c = migrateCard(old, parseDate('2026-07-12'))
+  assert.ok(c.statementDate, 'должна появиться дата выписки')
+  assert.ok(c.dueDate, 'должна появиться дата платежа')
+  assert.ok(c.graceEndDate)
+  assert.equal(c.statementCycleDays, 30)
+  assert.equal(c.minPaymentBase, 'currentDebt')
+  // dueDate строго после statementDate
+  assert.ok(parseDate(c.dueDate) > parseDate(c.statementDate))
+})
+
+test('migrateCard: идемпотентна для новой модели', () => {
+  const nw = {
+    name: 'Новая', statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+    currentDebt: { amount: 0, currency: 'RUB' },
+  }
+  const c = migrateCard(nw, parseDate('2026-07-12'))
+  assert.equal(c.statementDate, '2026-07-26')
+  assert.equal(c.dueDate, '2026-08-19')
 })
