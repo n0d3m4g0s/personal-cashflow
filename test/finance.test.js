@@ -5,6 +5,7 @@ import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
   cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt, buildMonthly,
 } from '../src/finance.js'
+import { migrateCard } from '../src/store.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
   const s = { frequency: 'monthly', interval: 1, startDate: '2026-01-15', endDate: null }
@@ -252,4 +253,30 @@ test('buildMonthly: минимальные платежи карт входят 
   assert.ok(Math.abs(m.card - 14000) < 1)
   assert.ok(Math.abs(m.obligatory - 14000) < 1) // нет expenses/loans
   assert.ok(Math.abs(m.surplus - (300000 - 14000)) < 1)
+})
+
+test('migrateCard: синтезирует даты из старой модели', () => {
+  const old = {
+    name: 'Старая', statementDay: 5, dueDay: 25, gracePeriodDays: 55,
+    currentDebt: { amount: 10000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+  }
+  const c = migrateCard(old, parseDate('2026-07-12'))
+  assert.ok(c.statementDate, 'должна появиться дата выписки')
+  assert.ok(c.dueDate, 'должна появиться дата платежа')
+  assert.ok(c.graceEndDate)
+  assert.equal(c.statementCycleDays, 30)
+  assert.equal(c.minPaymentBase, 'currentDebt')
+  // dueDate строго после statementDate
+  assert.ok(parseDate(c.dueDate) > parseDate(c.statementDate))
+})
+
+test('migrateCard: идемпотентна для новой модели', () => {
+  const nw = {
+    name: 'Новая', statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+    currentDebt: { amount: 0, currency: 'RUB' },
+  }
+  const c = migrateCard(nw, parseDate('2026-07-12'))
+  assert.equal(c.statementDate, '2026-07-26')
+  assert.equal(c.dueDate, '2026-08-19')
 })
