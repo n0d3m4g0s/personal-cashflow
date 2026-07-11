@@ -200,16 +200,18 @@ export function cardCycle(card, from = today()) {
   return { statement, due, graceEnd }
 }
 
-// Дата ближайшего платежа по карте: первый день `dueDay` СТРОГО после выписки.
+// Дата ближайшего платежа по карте. Новая модель — явные даты (через cardCycle);
+// старая модель (statementDay/dueDay) — для обратной совместимости до миграции.
 export function cardNextDue(card, from = today()) {
+  if (card.statementDate) {
+    const { statement, due } = cardCycle(card, from)
+    return { statement, due }
+  }
   const stmtDay = Number(card.statementDay) || 1
   const dueDay = Number(card.dueDay) || stmtDay
-  // Находим последнюю прошедшую (или ближайшую) выписку и следующий dueDay после неё,
-  // но не раньше сегодняшнего дня.
   for (let offset = -1; offset < 14; offset++) {
     const base = addMonths(from, offset, 1)
     const stmt = clampDayToMonth(base.getFullYear(), base.getMonth(), stmtDay)
-    // следующий dueDay строго после выписки
     let due = clampDayToMonth(stmt.getFullYear(), stmt.getMonth(), dueDay)
     if (due <= stmt) due = clampDayToMonth(stmt.getFullYear(), stmt.getMonth() + 1, dueDay)
     if (due >= from) return { statement: stmt, due }

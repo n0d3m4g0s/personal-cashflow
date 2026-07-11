@@ -59,6 +59,16 @@ test('cardNextDue: due после выписки, не в прошлом', () =>
   assert.ok(due > statement)
 })
 
+test('cardNextDue: работает с явными датами через cardCycle', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  const { statement, due } = cardNextDue(card, parseDate('2026-07-12'))
+  assert.equal(fmtISO(statement), '2026-07-26')
+  assert.equal(fmtISO(due), '2026-08-19')
+})
+
 test('buildForecast: считает нарастающий остаток и алерты', () => {
   const state = {
     settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0118 }, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 3 },
