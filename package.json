@@ -1,0 +1,19 @@
+{
+  "name": "family-finance-tracker",
+  "version": "1.0.0",
+  "description": "Финансовый менеджер семьи: кредитки, кредиты, аренда, цели, прогноз денежного потока",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.8"
+  }
+}
