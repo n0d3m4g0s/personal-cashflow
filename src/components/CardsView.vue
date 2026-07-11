@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { state, addItem, removeItem } from '../store.js'
-import { cardCycle, cardNextDue, cardMinPayment, cardDebt, fmtHuman } from '../finance.js'
+import { cardCycle, cardMinPayment, cardDebt, fmtHuman } from '../finance.js'
 import { formatMoney, moneyToRub } from '../money.js'
 import MoneyInput from './MoneyInput.vue'
 
@@ -64,7 +64,7 @@ function ownerLabel(o) { return OWNERS.find((x) => x.value === o)?.label || o }
         <div class="spread">
           <div>
             <h3 style="margin: 0">{{ c.name }} <span class="pill" :class="ownerTag(c.owner)">{{ ownerLabel(c.owner) }}</span></h3>
-            <div class="small muted">{{ c.bank }} · лимит {{ money(moneyToRub(c.creditLimit, rates)) }} · льготный {{ c.gracePeriodDays }} дн.</div>
+            <div class="small muted">{{ c.bank }} · лимит {{ money(moneyToRub(c.creditLimit, rates)) }} · льготный до {{ fmtHuman(info(c).graceEnd) }}</div>
           </div>
           <div class="row">
             <button class="sm ghost" @click="openEdit(c)">Изм.</button>
