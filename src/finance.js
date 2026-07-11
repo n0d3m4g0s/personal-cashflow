@@ -172,6 +172,34 @@ export function cardMinPayment(card, rates) {
   return Math.min(min, base) // не больше долга
 }
 
+// Актуальный на дату `from` цикл карты: { statement, due, graceEnd }.
+// Хранимые даты — ISO ближайшего/последнего цикла; если он в прошлом, катим вперёд,
+// сохраняя якорный день выписки и постоянные смещения due/graceEnd (в днях).
+export function cardCycle(card, from = today()) {
+  const stmt0 = parseDate(card.statementDate)
+  const due0 = parseDate(card.dueDate) || stmt0
+  const grace0 = parseDate(card.graceEndDate) || due0
+  if (!stmt0) {
+    // нет данных — деградируем к сегодняшнему дню
+    return { statement: from, due: from, graceEnd: from }
+  }
+  const dueOffset = diffDays(due0, stmt0)     // дней от выписки до платежа
+  const graceOffset = diffDays(grace0, stmt0) // дней от выписки до конца грейса
+  const anchorDay = stmt0.getDate()
+  const stepMonths = Math.max(1, Math.round((Number(card.statementCycleDays) || 30) / 30))
+
+  let statement = stmt0
+  let due = due0
+  let guard = 0
+  while (due < from && guard < 600) {
+    guard++
+    statement = addMonths(stmt0, guard * stepMonths, anchorDay)
+    due = addDays(statement, dueOffset)
+  }
+  const graceEnd = addDays(statement, graceOffset)
+  return { statement, due, graceEnd }
+}
+
 // Дата ближайшего платежа по карте: первый день `dueDay` СТРОГО после выписки.
 export function cardNextDue(card, from = today()) {
   const stmtDay = Number(card.statementDay) || 1

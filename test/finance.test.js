@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle,
 } from '../src/finance.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
@@ -85,4 +85,48 @@ test('computeGoals: ETA по профициту', () => {
   const g = computeGoals(state)
   assert.equal(g.surplus, 100000)
   assert.equal(g.results[0].monthsNeeded, 3) // 300k / 100k
+})
+
+test('cardCycle: возвращает сохранённый цикл, если он ещё актуален', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  const { statement, due, graceEnd } = cardCycle(card, parseDate('2026-07-12'))
+  assert.equal(fmtISO(statement), '2026-07-26')
+  assert.equal(fmtISO(due), '2026-08-19')
+  assert.equal(fmtISO(graceEnd), '2026-08-19')
+})
+
+test('cardCycle: катит цикл вперёд, если он в прошлом', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19',
+    graceEndDate: '2026-08-19', statementCycleDays: 30,
+  }
+  // from после due первого цикла → ожидаем следующий цикл (выписка 26 августа)
+  const { statement, due } = cardCycle(card, parseDate('2026-08-20'))
+  assert.equal(statement.getMonth(), 7) // август (0-based)
+  assert.equal(statement.getDate(), 26)
+  assert.ok(due >= parseDate('2026-08-20'))
+})
+
+test('cardCycle: сохраняет смещение due и graceEnd от выписки', () => {
+  const card = {
+    statementDate: '2026-07-26', dueDate: '2026-08-19', // +24 дня
+    graceEndDate: '2026-09-08', statementCycleDays: 30, // +44 дня
+  }
+  const { statement, due, graceEnd } = cardCycle(card, parseDate('2026-09-01'))
+  assert.equal(diffDays(due, statement), 24)
+  assert.equal(diffDays(graceEnd, statement), 44)
+})
+
+test('cardCycle: якорный день клампится к концу короткого месяца', () => {
+  const card = {
+    statementDate: '2026-01-31', dueDate: '2026-02-20',
+    graceEndDate: '2026-02-20', statementCycleDays: 30,
+  }
+  // прокрутка в февраль: 31 → 28
+  const { statement } = cardCycle(card, parseDate('2026-02-27'))
+  assert.equal(statement.getMonth(), 1) // февраль
+  assert.equal(statement.getDate(), 28)
 })
