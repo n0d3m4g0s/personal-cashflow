@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt, buildMonthly,
 } from '../src/finance.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
@@ -229,4 +229,27 @@ test('buildForecast: карта с нулевой выпиской и долго
   assert.ok(cardEvents.length >= 1, 'карта с нулевой выпиской, но ненулевым долгом должна попасть в прогноз')
   assert.equal(fmtISO(cardEvents[0].date), '2026-08-24')
   assert.ok(cardEvents[0].graceDate, 'событие карты должно нести дату конца грейса')
+})
+
+test('buildMonthly: минимальные платежи карт входят в обязательства', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = {
+    settings: { rates },
+    incomes: [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }],
+    expenses: [],
+    loans: [],
+    cards: [{
+      name: 'Т', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-07-26', dueDate: '2026-08-19', graceEndDate: '2026-08-19', statementCycleDays: 30,
+      currentDebt: { amount: 100000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 14, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 600, currency: 'RUB' },
+      minPaymentPlusInterest: false, apr: 0.619,
+    }],
+    goals: [],
+  }
+  const m = buildMonthly(state, rates)
+  // минплатёж = 100000 × 0.14 = 14000
+  assert.ok(Math.abs(m.card - 14000) < 1)
+  assert.ok(Math.abs(m.obligatory - 14000) < 1) // нет expenses/loans
+  assert.ok(Math.abs(m.surplus - (300000 - 14000)) < 1)
 })

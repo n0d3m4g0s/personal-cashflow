@@ -370,11 +370,18 @@ export function buildMonthly(state, rates, start = today(), horizonMonths = 6) {
     if (loan.disabled) continue
     loanM += moneyToRub(loan, rates)
   }
-  const obligatory = expenseM + loanM
+  let cardM = 0
+  for (const card of state.cards || []) {
+    if (card.disabled) continue
+    if (cardDebt(card, rates) <= 0) continue
+    cardM += cardMinPayment(card, rates)
+  }
+  const obligatory = expenseM + loanM + cardM
   return {
     income: incomeM,
     expense: expenseM,
     loan: loanM,
+    card: cardM,
     obligatory,
     surplus: incomeM - obligatory,
   }
