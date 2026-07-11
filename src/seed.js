@@ -7,14 +7,32 @@ import { DEFAULT_RATES } from './money.js'
 let _id = 0
 const id = (p) => `${p}_${++_id}`
 
-// ISO-дата дня `day` текущего месяца (для якорей регулярных платежей).
-function dayThisMonth(day) {
-  const n = new Date()
-  const d = new Date(n.getFullYear(), n.getMonth(), day)
+// ISO-дата без сдвига TZ (локальный год/месяц/день, а не UTC).
+function fmtLocalISO(d) {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${dd}`
+}
+
+// ISO-дата дня `day` текущего месяца (для якорей регулярных платежей).
+function dayThisMonth(day) {
+  const n = new Date()
+  return fmtLocalISO(new Date(n.getFullYear(), n.getMonth(), day))
+}
+
+// ISO-дата дня `day` следующего месяца.
+function nextMonthDay(day) {
+  const n = new Date()
+  const d = new Date(n.getFullYear(), n.getMonth() + 1, day)
+  return fmtLocalISO(d)
+}
+
+// ISO-дата дня `day` через `months` месяцев от текущего.
+function monthsAheadDay(months, day) {
+  const n = new Date()
+  const d = new Date(n.getFullYear(), n.getMonth() + months, day)
+  return fmtLocalISO(d)
 }
 
 const monthly = (day) => ({ frequency: 'monthly', interval: 1, startDate: dayThisMonth(day), endDate: null })
@@ -60,15 +78,36 @@ export function makeSeed() {
     ],
 
     // ---- Кредитные карты ----
-    // statementDay — день выписки; dueDay — день платежа; gracePeriodDays — инфо;
+    // statementDate/dueDate/graceEndDate — явные даты ближайшего цикла (пользователь
+    // подгоняет под себя); statementCycleDays — длина цикла выписки;
     // payStrategy: 'full' (гасим выписку, без процентов) | 'minimum' (только минимум).
     cards: [
-      card('Т-Банк (муж)', 'Т-Банк', 'husband', { limit: 300000, statementDay: 5, dueDay: 25, grace: 55 }),
-      card('Озон Банк', 'Озон Банк', 'husband', { limit: 150000, statementDay: 10, dueDay: 30, grace: 120 }),
-      card('Уралсиб', 'Уралсиб', 'husband', { limit: 120000, statementDay: 1, dueDay: 20, grace: 60 }),
-      card('Сбербанк', 'Сбербанк', 'husband', { limit: 200000, statementDay: 15, dueDay: 5, grace: 120 }),
-      card('Т-Банк (жена)', 'Т-Банк', 'wife', { limit: 100000, statementDay: 8, dueDay: 28, grace: 55 }),
-      card('Альфа-Банк (жена)', 'Альфа-Банк', 'wife', { limit: 100000, statementDay: 12, dueDay: 2, grace: 100, disabled: true, note: 'Если карта есть — включите и заполните' }),
+      card('Т-Банк (муж)', 'Т-Банк', 'husband', {
+        limit: 238000, statementDate: dayThisMonth(26), dueDate: nextMonthDay(19),
+        graceEndDate: nextMonthDay(19), grace: 55, statementCycleDays: 30,
+        minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
+      }),
+      card('Озон Банк', 'Озон Банк', 'husband', {
+        limit: 49000, statementDate: nextMonthDay(8), dueDate: nextMonthDay(24),
+        graceEndDate: monthsAheadDay(2, 8), grace: 120, statementCycleDays: 30,
+        minPaymentPercent: 4, minPaymentFixed: 400, minPaymentPlusInterest: true, apr: 0.624,
+      }),
+      card('Уралсиб', 'Уралсиб', 'husband', {
+        limit: 20000, statementDate: nextMonthDay(1), dueDate: nextMonthDay(30),
+        graceEndDate: monthsAheadDay(2, 30), grace: 120, statementCycleDays: 30,
+        minPaymentPercent: 3, minPaymentFixed: 300, minPaymentPlusInterest: true, apr: 0.999,
+      }),
+      card('Сбербанк', 'Сбербанк', 'husband', {
+        limit: 20000, statementDate: dayThisMonth(15), dueDate: nextMonthDay(5),
+        graceEndDate: nextMonthDay(5), grace: 120, statementCycleDays: 30,
+        minPaymentPercent: 5, minPaymentFixed: 0, apr: 0,
+      }),
+      card('Т-Банк (жена)', 'Т-Банк', 'wife', {
+        limit: 195000, statementDate: nextMonthDay(8), dueDate: monthsAheadDay(1, 28),
+        graceEndDate: monthsAheadDay(1, 28), grace: 55, statementCycleDays: 30,
+        minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
+        transferLimit: 150000, transferGraceDays: 55,
+      }),
     ],
 
     // ---- Расходы ----
@@ -115,13 +154,20 @@ function card(name, bank, owner, o) {
   return {
     id: id('card'), name, bank, owner,
     creditLimit: { amount: o.limit, currency: 'RUB' },
-    statementDay: o.statementDay,
-    dueDay: o.dueDay,
-    gracePeriodDays: o.grace,
-    minPaymentPercent: 5,
-    minPaymentFixed: { amount: 0, currency: 'RUB' },
+    statementDate: o.statementDate,
+    dueDate: o.dueDate,
+    graceEndDate: o.graceEndDate || o.dueDate,
+    statementCycleDays: o.statementCycleDays || 30,
+    gracePeriodDays: o.grace || 0,
+    minPaymentPercent: o.minPaymentPercent ?? 5,
+    minPaymentBase: o.minPaymentBase || 'currentDebt',
+    minPaymentFixed: { amount: o.minPaymentFixed || 0, currency: 'RUB' },
+    minPaymentPlusInterest: o.minPaymentPlusInterest || false,
+    apr: o.apr || 0,
     currentDebt: { amount: 0, currency: 'RUB' },
     statementBalance: { amount: 0, currency: 'RUB' },
+    transferLimit: { amount: o.transferLimit || 0, currency: 'RUB' },
+    transferGraceDays: o.transferGraceDays || o.grace || 0,
     payStrategy: 'full',
     disabled: o.disabled || false,
     note: o.note || 'Заполните текущий долг и сумму выписки, проверьте даты и льготный период',
