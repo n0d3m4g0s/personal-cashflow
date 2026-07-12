@@ -87,7 +87,7 @@ test('cardLoanInterest: сумма сверх лимита → проценты 
   assert.ok(Math.abs(i - expected) < 1, `ожидали ${expected}, получили ${i}`)
 })
 
-test('applyScenario: cardLoan даёт наличные и растит долг карты', () => {
+test('applyScenario: cardLoan даёт наличные, долг карты НЕ трогает (модель A)', () => {
   const st = baseState()
   st.cards = [wifeCard()]
   const scenario = { id: 's4', name: 'Заём', moves: [
@@ -96,7 +96,9 @@ test('applyScenario: cardLoan даёт наличные и растит долг
   const out = applyScenario(st, scenario)
   assert.equal(out.incomes.length, 1)
   assert.equal(out.incomes[0].amount, 150000)
-  assert.equal(out.cards[0].currentDebt.amount, 150000)
+  // Модель A: заём чисто кассовый (пара +/- в evaluateScenario). currentDebt не растёт,
+  // иначе карта в buildForecast создаст второе гашение долга → двойной вычет cash.
+  assert.equal(out.cards[0].currentDebt.amount, 0)
 })
 
 test('evaluateScenario: билеты с займом карты жены, авто-возврат в грейс → overpayment 0', () => {
