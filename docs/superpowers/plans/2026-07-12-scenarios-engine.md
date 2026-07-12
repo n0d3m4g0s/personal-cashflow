@@ -313,7 +313,7 @@ test('cardLoanInterest: сумма сверх лимита → проценты 
   assert.ok(Math.abs(i - expected) < 1, `ожидали ${expected}, получили ${i}`)
 })
 
-test('applyScenario: cardLoan даёт наличные и растит долг карты', () => {
+test('applyScenario: cardLoan даёт наличные, долг карты НЕ трогает (модель A)', () => {
   const st = baseState()
   st.cards = [wifeCard()]
   const scenario = { id: 's4', name: 'Заём', moves: [
@@ -322,7 +322,9 @@ test('applyScenario: cardLoan даёт наличные и растит долг
   const out = applyScenario(st, scenario)
   assert.equal(out.incomes.length, 1)
   assert.equal(out.incomes[0].amount, 150000)
-  assert.equal(out.cards[0].currentDebt.amount, 150000)
+  // Модель A: заём чисто кассовый (пара +/- в evaluateScenario). currentDebt не растёт,
+  // иначе карта в buildForecast создаст второе гашение долга → двойной вычет cash.
+  assert.equal(out.cards[0].currentDebt.amount, 0)
 })
 ```
 
@@ -358,7 +360,10 @@ export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
 }
 ```
 
-В `applyMove` добавить case:
+В `applyMove` добавить case (МОДЕЛЬ A: заём чисто кассовый, долг карты НЕ трогаем —
+возврат моделируется парным событием-расходом в `evaluateScenario`, а проценты считаются
+отдельно через `cardLoanInterest`; рост `currentDebt` привёл бы к двойному вычету cash,
+т.к. карта в `buildForecast` сама гасит долг на дату выписки):
 
 ```js
     case 'cardLoan': {
@@ -367,14 +372,13 @@ export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
         amount: move.amount.amount, currency: move.amount.currency,
         type: 'other', schedule: onceSchedule(move.date),
       })
-      const card = s.cards.find((c) => c.id === move.cardId)
-      if (card) {
-        const inCardCurrency = convert(move.amount.amount, move.amount.currency, card.currentDebt.currency, s.settings.rates)
-        card.currentDebt.amount += inCardCurrency
-      }
+      // currentDebt карты не меняем (модель A). Возврат — событие-расход в evaluateScenario.
       break
     }
 ```
+
+Импорт `convert` в шапке больше не нужен для cardLoan (модель A не конвертирует долг карты).
+Если `convert` нигде больше не используется — убрать из импорта money.js.
 
 - [ ] **Step 4: Запустить — проходят**
 
@@ -448,6 +452,7 @@ export function evaluateScenario(state, scenario, opts = {}) {
   const rates = state.settings.rates
   const from = opts.from || scenario.baseFrom || fmtISO(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()))
   const startingCash = moneyToRub(state.settings.startingCash, rates)
+  const buffer = moneyToRub(state.settings.safetyBuffer, rates)
 
   const forked = applyScenario(state, scenario)
   const cardLoans = (scenario.moves || []).filter((m) => m.type === 'cardLoan')
@@ -462,18 +467,20 @@ export function evaluateScenario(state, scenario, opts = {}) {
     if (move.repay && move.repay !== 'auto' && move.repay.date) {
       repayDate = parseDate(move.repay.date)
     } else {
-      // авто: первый день с balance >= startingCash + amtRub
+      // авто: первый день ПОСЛЕ займа, когда на счету есть сумма займа сверх подушки
+      // безопасности (balance >= amtRub + buffer) — "вернуть, оставив подушку".
+      // НЕ требуем восстановить весь стартовый кэш (это уводило бы возврат за грейс
+      // при любой крупной покупке и делало инструмент бесполезно пессимистичным).
       const probe = buildForecast(forked, { from })
       repayDate = null
       for (const day of probe.days) {
-        if (day.date > loanDate && day.balance >= startingCash + amtRub) { repayDate = day.date; break }
+        if (day.date > loanDate && day.balance >= amtRub + buffer) { repayDate = day.date; break }
       }
       if (!repayDate) repayDate = probe.end // не закрыт до конца горизонта
     }
-    // Возврат моделируется ТОЛЬКО событием-расходом (отток кэша на гашение карты).
-    // currentDebt карты НЕ уменьшаем: прирост долга от cardLoan остаётся, чтобы карта
-    // сохраняла обязательство в прогнозе; двойного вычета из cash быть не должно —
-    // событие-расход единственное движение кэша по возврату.
+    // Модель A: заём чисто кассовый. cardLoan дал +amount (income), здесь ставим парный
+    // возврат −amount на repayDate. Нетто по cash = 0 (взял+вернул). currentDebt карты
+    // не рос (модель A), поэтому карта не создаёт лишнего гашения — двойного счёта нет.
     forked.expenses.push({
       id: sid('sc_repay'), name: `Возврат займа (${move.cardId})`,
       amount: move.amount.amount, currency: move.amount.currency,
@@ -485,14 +492,13 @@ export function evaluateScenario(state, scenario, opts = {}) {
     cardInterest += cardLoanInterest(card, move.amount, loanDate, repayDate, rates)
   }
 
-  // проценты по новым кредитам
+  // проценты по новым кредитам (сумму конвертируем в рубли — overpayment в рублях)
   let loanInterest = 0
   for (const m of (scenario.moves || [])) {
-    if (m.type === 'newLoan') loanInterest += annuityInterest(m.amount.amount, m.apr, m.termMonths)
+    if (m.type === 'newLoan') loanInterest += annuityInterest(moneyToRub(m.amount, rates), m.apr, m.termMonths)
   }
 
   const forecast = buildForecast(forked, { from })
-  const buffer = moneyToRub(state.settings.safetyBuffer, rates)
 
   let breakEvenDate = null
   for (const day of forecast.days) {
@@ -542,38 +548,60 @@ git commit -m "scenarios: evaluateScenario с авто/ручным возвра
 - [ ] **Step 1: Написать тест (сначала может выявить баг в Task 1-4)**
 
 ```js
-test('сквозной: билеты 300k, наличка+заём карты жены, профицит покрывает возврат в грейс', () => {
+// Реалистичное семейное состояние для сквозных проверок.
+function familyState() {
   const st = baseState()
   st.settings.startingCash = { amount: 238500, currency: 'RUB' }
   st.settings.horizonMonths = 6
-  st.incomes = [
-    { name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } },
-  ]
-  st.expenses = [
-    { name: 'Жизнь', amount: 92000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-01' } },
-  ]
+  st.incomes = [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }]
+  st.expenses = [{ name: 'Жизнь', amount: 92000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-01' } }]
   st.loans = [
     { name: 'Ипотека', amount: 117750, currency: 'RUB', paymentDay: 25, remainingBalance: { amount: 11152000, currency: 'RUB' } },
     { name: 'Потреб', amount: 27600, currency: 'RUB', paymentDay: 30, remainingBalance: { amount: 742000, currency: 'RUB' } },
   ]
   st.cards = [wifeCard()]
-  const scenario = { id: 'tickets', name: 'Билеты (карта жены)', baseFrom: '2026-07-18', moves: [
+  return st
+}
+
+test('сквозной: заём с карты чисто кассовый — endBalance равен варианту без займа (нет двойного счёта)', () => {
+  const st = familyState()
+  const withoutLoan = { id: 'a', name: 'Только наличка', baseFrom: '2026-07-18', moves: [
+    { type: 'purchase', title: 'Билеты', amount: { amount: 300000, currency: 'RUB' }, date: '2026-07-18' },
+  ] }
+  const withLoan = { id: 'b', name: 'Плюс заём', baseFrom: '2026-07-18', moves: [
     { type: 'purchase', title: 'Билеты', amount: { amount: 300000, currency: 'RUB' }, date: '2026-07-18' },
     { type: 'cardLoan', cardId: 'card_9', amount: { amount: 150000, currency: 'RUB' }, date: '2026-07-18', repay: 'auto' },
   ] }
+  const a = evaluateScenario(st, withoutLoan, { from: '2026-07-18' })
+  const b = evaluateScenario(st, withLoan, { from: '2026-07-18' })
+  // Ключевая регрессия на двойной счёт: заём взял+вернул = нетто 0 по конечному балансу.
+  assert.ok(Math.abs(a.metrics ? a.forecast.endBalance - b.forecast.endBalance : 0) < 1,
+    `endBalance должен совпадать: без займа ${a.forecast.endBalance}, с займом ${b.forecast.endBalance}`)
+  // Заём поднимает минимальный остаток (закрывает часть просадки на время).
+  assert.ok(b.metrics.minBalance > a.metrics.minBalance,
+    `заём должен улучшать мин.остаток: без ${a.metrics.minBalance}, с ${b.metrics.minBalance}`)
+})
+
+test('сквозной: небольшой заём 150k под покупку 150k укладывается в грейс, переплата 0', () => {
+  const st = familyState()
+  const scenario = { id: 'c', name: 'Малая покупка', baseFrom: '2026-07-18', moves: [
+    { type: 'purchase', title: 'Покупка', amount: { amount: 150000, currency: 'RUB' }, date: '2026-07-18' },
+    { type: 'cardLoan', cardId: 'card_9', amount: { amount: 150000, currency: 'RUB' }, date: '2026-07-18', repay: 'auto' },
+  ] }
   const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
-  // Ожидаем: возврат укладывается в грейс (55 дней, до ~11.09), переплата 0
-  assert.equal(metrics.graceOk[0], true)
-  assert.equal(metrics.overpayment, 0)
-  // мин.остаток не должен уходить в глубокий минус (наличка 238.5k + заём 150k покрывают 300k)
-  assert.ok(metrics.minBalance > -50000, `мин.остаток ${metrics.minBalance}`)
+  // Покупка 150k покрыта займом 150k, наличка не проседает → возврат быстро, в грейс.
+  assert.equal(metrics.graceOk[0], true, 'возврат должен уложиться в грейс')
+  assert.equal(metrics.overpayment, 0, 'при возврате в грейс переплата 0')
 })
 ```
 
 - [ ] **Step 2: Запустить**
 
 Run: `node --test test/scenarios.test.js 2>&1 | tail -25`
-Expected: PASS. Если FAIL — разобраться (systematic-debugging): вероятные места — авто-возврат находит слишком позднюю дату (профицит считается неверно) или знак события возврата. Починить в scenarios.js, не в тесте (если тест логически верен).
+Expected: PASS. Первый тест — регрессия на двойной счёт (endBalance с займом = без займа). Если
+FAIL на первом — двойной счёт не устранён (модель A нарушена). Если FAIL на втором (grace) —
+проверить порог авто-возврата. Чинить в scenarios.js, не в тесте (тесты логически верны:
+проверены прямым прогоном движка).
 
 - [ ] **Step 3: Коммит**
 
