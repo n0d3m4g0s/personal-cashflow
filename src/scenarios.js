@@ -1,5 +1,7 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
+// parseDate/fmtISO/addDays/addMonths и moneyToRub используются ходами cardLoan/newLoan
+// и evaluateScenario (добавляются в следующих задачах этапа 2).
 import { parseDate, fmtISO, addDays, addMonths } from './finance.js'
 import { moneyToRub } from './money.js'
 
