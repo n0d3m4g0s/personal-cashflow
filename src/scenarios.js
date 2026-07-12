@@ -168,10 +168,11 @@ export function evaluateScenario(state, scenario, opts = {}) {
     cardInterest += cardLoanInterest(card, move.amount, loanDate, repayDate, rates)
   }
 
-  // проценты по новым кредитам (сумму конвертируем в рубли - overpayment в рублях)
+  // проценты по новым кредитам (сумму конвертируем в рубли - overpayment в рублях).
+  // Неполные ходы (без валидной даты) пропускаем, как и в applyScenario/цикле займов.
   let loanInterest = 0
   for (const m of (scenario.moves || [])) {
-    if (m.type === 'newLoan') loanInterest += annuityInterest(moneyToRub(m.amount, rates), m.apr, m.termMonths)
+    if (m.type === 'newLoan' && parseDate(m.startDate)) loanInterest += annuityInterest(moneyToRub(m.amount, rates), m.apr, m.termMonths)
   }
 
   const forecast = buildForecast(forked, { from })
