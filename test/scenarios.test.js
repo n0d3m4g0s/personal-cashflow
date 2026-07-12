@@ -158,6 +158,19 @@ test('сквозной: заём с карты чисто кассовый - end
     `заём должен улучшать мин.остаток: без ${a.metrics.minBalance}, с ${b.metrics.minBalance}`)
 })
 
+test('evaluateScenario: ручной возврат использует repayDate (формат UI), не авто', () => {
+  const st = baseState()
+  st.incomes = [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }]
+  st.cards = [wifeCard()]
+  const scenario = { id: 'm', name: 'Ручной', baseFrom: '2026-07-18', moves: [
+    { type: 'cardLoan', cardId: 'card_9', amount: { amount: 150000, currency: 'RUB' }, date: '2026-07-18', repay: 'manual', repayDate: '2026-10-01' },
+  ] }
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  // возврат 01.10 позже грейса (11.09) → graceOk false, overpayment > 0
+  assert.equal(metrics.graceOk[0], false)
+  assert.ok(metrics.overpayment > 0, 'ручной возврат за грейсом даёт проценты')
+})
+
 test('сквозной: небольшой заём 150k под покупку 150k укладывается в грейс, переплата 0', () => {
   const st = familyState()
   const scenario = { id: 'c', name: 'Малая покупка', baseFrom: '2026-07-18', moves: [

@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import { state } from '../store.js'
 import { evaluateScenario } from '../scenarios.js'
 import { formatMoney, moneyToRub } from '../money.js'
-import { fmtHuman, parseDate } from '../finance.js'
 import MoneyInput from './MoneyInput.vue'
 
 const rates = computed(() => state.settings.rates)
