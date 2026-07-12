@@ -1,7 +1,7 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
 import { parseDate, fmtISO, addDays, buildForecast } from './finance.js'
-import { moneyToRub } from './money.js'
+import { moneyToRub, convert } from './money.js'
 
 let _sid = 0
 const sid = (p = 'sc') => `${p}_${++_sid}`
@@ -131,6 +131,18 @@ function applyMove(s, move) {
         type: 'other', schedule: onceSchedule(move.date),
       })
       // currentDebt карты не меняем (модель A). Возврат - событие-расход в evaluateScenario.
+      break
+    }
+    case 'transfer': {
+      if (!parseDate(move.date)) break // неполный ход (нет даты) - пропускаем
+      // Гасим долг fromCardId (долг снят с этой карты этим переносом).
+      const from = s.cards.find((c) => c.id === move.fromCardId)
+      if (from) {
+        const inFromCurrency = convert(move.amount.amount, move.amount.currency, from.currentDebt.currency, s.settings.rates)
+        from.currentDebt.amount = Math.max(0, from.currentDebt.amount - inFromCurrency)
+      }
+      // toCardId (долг переезжает): currentDebt НЕ трогаем (модель A). Рост и возврат -
+      // парным событием в evaluateScenario. Наличные не добавляем.
       break
     }
     default:
