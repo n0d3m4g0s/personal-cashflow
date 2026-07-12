@@ -101,6 +101,30 @@ test('cardLoanInterest: сумма сверх лимита → проценты 
   assert.ok(Math.abs(i - expected) < 1, `ожидали ${expected}, получили ${i}`)
 })
 
+test('cardLoanInterest: transferGraceEnabled=false → проценты на всю сумму с первого дня', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55,
+    transferGraceEnabled: false, apr: 0.624,
+  }
+  // 100000 на 30 дней под 62.4%, грейса на перевод нет → проценты на всю сумму
+  const i = cardLoanInterest(card, { amount: 100000, currency: 'RUB' },
+    parseDate('2026-07-18'), parseDate('2026-08-17'), rates)
+  const expected = 0.624 * 100000 * 30 / 365
+  assert.ok(Math.abs(i - expected) < 1, `ожидали ${expected}, получили ${i}`)
+})
+
+test('cardLoanInterest: transferGraceEnabled отсутствует → прежнее поведение (совместимость)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55, apr: 0.619,
+  }
+  // 150000 в лимите, возврат в грейс (45 дней < 55) → 0 (как в этапе 2)
+  const i = cardLoanInterest(card, { amount: 150000, currency: 'RUB' },
+    parseDate('2026-07-18'), parseDate('2026-09-01'), rates)
+  assert.equal(i, 0)
+})
+
 test('applyScenario: cardLoan даёт наличные, долг карты НЕ трогает (модель A)', () => {
   const st = baseState()
   st.cards = [wifeCard()]

@@ -33,14 +33,21 @@ export function annuityInterest(principal, apr, termMonths) {
 
 // Переплата по займу с карты (в рублях). free - в пределах беспроцентного лимита
 // перевода, over - сверх лимита (проценты с первого дня). loanDate/repayDate - Date.
+// Если у карты грейс на перевод не действует (transferGraceEnabled === false, как у
+// Озон/Уралсиб) - проценты на всю сумму с первого дня. Иначе (true или поле не задано -
+// совместимость с этапом 2, где у карты жены грейс на перевод есть) - прежняя логика
+// free/over с грейсом.
 export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
   const amt = moneyToRub(amount, rates)
-  const limit = moneyToRub(card.transferLimit, rates)
   const apr = Number(card.apr) || 0
+  const daysTotal = Math.max(0, Math.round((repayDate - loanDate) / 86400000))
+  if (card.transferGraceEnabled === false) {
+    return apr * amt * daysTotal / 365
+  }
+  const limit = moneyToRub(card.transferLimit, rates)
   const free = Math.min(amt, limit)
   const over = Math.max(0, amt - limit)
   const graceEnd = addDays(loanDate, Number(card.transferGraceDays) || 0)
-  const daysTotal = Math.max(0, Math.round((repayDate - loanDate) / 86400000))
   const overInterest = apr * over * daysTotal / 365
   let freeInterest = 0
   if (repayDate > graceEnd) {
