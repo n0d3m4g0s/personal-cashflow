@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt, buildMonthly,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
 } from '../src/finance.js'
 import { migrateCard } from '../src/store.js'
 
@@ -193,6 +193,29 @@ test('cardMinPayment: не больше долга', () => {
   }
   // max(70, 600) = 600, но долг 500 → кламп до 500
   assert.equal(cardMinPayment(card, rates), 500)
+})
+
+test('cardMinCore: тело минимума без процентов от произвольного остатка', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = { minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' } }
+  // 4% от 50000 = 2000 (> фикс 400) → 2000. Процентов НЕТ (это core).
+  assert.equal(cardMinCore(card, 50000, rates), 2000)
+  // 4% от 5000 = 200 (< фикс 400) → 400.
+  assert.equal(cardMinCore(card, 5000, rates), 400)
+  // кламп до остатка: 4% от 300 = 12, фикс 400, но остаток 300 → 300.
+  assert.equal(cardMinCore(card, 300, rates), 300)
+})
+
+test('cardMinPayment: регрессия после рефактора, прежний результат (Озон 4%+проценты)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' },
+    minPaymentPlusInterest: true, apr: 0.624, statementCycleDays: 30,
+  }
+  // core = max(1576, 400) = 1576; проценты = 39400×0.624×30/365 ≈ 2020.6; итого ≈ 3596.6
+  const interest = 39400 * 0.624 * 30 / 365
+  assert.ok(Math.abs(cardMinPayment(card, rates) - (1576 + interest)) < 1)
 })
 
 test('cardDebt: statementBalance=0 → берёт currentDebt (корень бага прогноза)', () => {

@@ -171,17 +171,20 @@ export function cardDebt(card, rates) {
   return moneyToRub(hasStatement ? sb : card.currentDebt, rates)
 }
 
-// Обязательный (минимальный) платёж по карте (в рублях) по формуле банка:
-// max(база×%, fixed) + (plusInterest ? проценты : 0), но не больше долга.
+// Тело минимального платежа БЕЗ процентов от произвольного остатка (в рублях):
+// max(% от остатка, фикс), но не больше остатка. Проценты (для minPaymentPlusInterest)
+// начисляются отдельно вызывающим кодом - здесь их нет, чтобы не задваивать в графике.
+export function cardMinCore(card, balanceRub, rates) {
+  const byPct = balanceRub * (Number(card.minPaymentPercent) || 0) / 100
+  const fixed = moneyToRub(card.minPaymentFixed, rates)
+  return Math.min(Math.max(byPct, fixed), Math.max(0, balanceRub))
+}
+
+// Обязательный (минимальный) платёж по карте (в рублях): тело (cardMinCore) + проценты,
+// если minPaymentPlusInterest, но не больше долга.
 export function cardMinPayment(card, rates) {
   const debt = cardDebt(card, rates)
-  const base = card.minPaymentBase === 'statement'
-    ? moneyToRub(card.statementBalance, rates)
-    : moneyToRub(card.currentDebt, rates)
-  const pct = (Number(card.minPaymentPercent) || 0) / 100
-  const byPct = base * pct
-  const fixed = moneyToRub(card.minPaymentFixed, rates)
-  const core = Math.max(byPct, fixed)
+  const core = cardMinCore(card, debt, rates)
   let interest = 0
   if (card.minPaymentPlusInterest) {
     const apr = Number(card.apr) || 0
