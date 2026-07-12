@@ -57,6 +57,19 @@ export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
   return overInterest + freeInterest
 }
 
+// Цена переноса долга НА карту toCard (в рублях): комиссия + проценты + сведения о лимите.
+// toCard - карта, на которую переезжает долг (она платит). transferDate/repayDate - Date.
+export function transferCost(toCard, amount, transferDate, repayDate, rates) {
+  const amtRub = moneyToRub(amount, rates)
+  const limit = moneyToRub(toCard.transferLimit, rates)
+  const free = moneyToRub(toCard.creditLimit, rates) - moneyToRub(toCard.currentDebt, rates)
+  const availableLimit = Math.min(limit, Math.max(0, free))
+  const exceedsLimit = amtRub > availableLimit
+  const fee = (Number(toCard.transferFeePercent) || 0) / 100 * amtRub + moneyToRub(toCard.transferFeeFixed, rates)
+  const interest = cardLoanInterest(toCard, amount, transferDate, repayDate, rates)
+  return { fee, interest, total: fee + interest, availableLimit, exceedsLimit }
+}
+
 // Применяет сценарий к состоянию, возвращая НОВОЕ состояние (исходник не мутируется).
 export function applyScenario(state, scenario) {
   const s = JSON.parse(JSON.stringify(state))

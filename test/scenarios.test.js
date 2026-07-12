@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyScenario, annuityInterest, cardLoanInterest, evaluateScenario } from '../src/scenarios.js'
+import { applyScenario, annuityInterest, cardLoanInterest, evaluateScenario, transferCost } from '../src/scenarios.js'
 import { parseDate } from '../src/finance.js'
 
 const baseState = () => ({
@@ -217,4 +217,48 @@ test('сквозной: небольшой заём 150k под покупку 1
   // Покупка 150k покрыта займом 150k, наличка не проседает → возврат быстро, в грейс.
   assert.equal(metrics.graceOk[0], true, 'возврат должен уложиться в грейс')
   assert.equal(metrics.overpayment, 0, 'при возврате в грейс переплата 0')
+})
+
+const wifeAsTo = () => ({
+  id: 'card_9', creditLimit: { amount: 195000, currency: 'RUB' },
+  currentDebt: { amount: 0, currency: 'RUB' },
+  transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55,
+  transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: { amount: 290, currency: 'RUB' },
+  apr: 0.619,
+})
+
+test('transferCost: перенос в лимит на карту жены, возврат в грейс → total = только комиссия', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const r = transferCost(wifeAsTo(), { amount: 100000, currency: 'RUB' },
+    parseDate('2026-07-18'), parseDate('2026-09-01'), rates) // 45 дней < 55
+  const fee = 0.029 * 100000 + 290
+  assert.ok(Math.abs(r.fee - fee) < 1, `fee ${r.fee} vs ${fee}`)
+  assert.equal(r.interest, 0)
+  assert.ok(Math.abs(r.total - fee) < 1)
+  assert.equal(r.exceedsLimit, false)
+})
+
+test('transferCost: сверх свободного лимита → exceedsLimit true', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = wifeAsTo()
+  card.currentDebt = { amount: 100000, currency: 'RUB' } // свободно 95000, лимит перевода min(150000,95000)=95000
+  const r = transferCost(card, { amount: 120000, currency: 'RUB' },
+    parseDate('2026-07-18'), parseDate('2026-09-01'), rates)
+  assert.equal(r.availableLimit, 95000)
+  assert.equal(r.exceedsLimit, true)
+})
+
+test('transferCost: карта-приёмник без грейса на перевод (Озон) → проценты с первого дня', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const ozon = {
+    creditLimit: { amount: 49000, currency: 'RUB' }, currentDebt: { amount: 0, currency: 'RUB' },
+    transferLimit: { amount: 0, currency: 'RUB' }, transferGraceDays: 0,
+    transferGraceEnabled: false, transferFeePercent: 0, transferFeeFixed: { amount: 0, currency: 'RUB' },
+    apr: 0.624,
+  }
+  const r = transferCost(ozon, { amount: 30000, currency: 'RUB' },
+    parseDate('2026-07-18'), parseDate('2026-08-17'), rates) // 30 дней
+  assert.equal(r.fee, 0)
+  const expected = 0.624 * 30000 * 30 / 365
+  assert.ok(Math.abs(r.interest - expected) < 1, `interest ${r.interest} vs ${expected}`)
 })
