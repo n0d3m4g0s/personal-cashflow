@@ -2,11 +2,26 @@
 import { ref, computed } from 'vue'
 import { state } from '../store.js'
 import { evaluateScenario } from '../scenarios.js'
+import { fmtHuman } from '../finance.js'
 import { formatMoney, moneyToRub } from '../money.js'
 import MoneyInput from './MoneyInput.vue'
 
 const rates = computed(() => state.settings.rates)
 function money(rub) { return formatMoney(rub, 'RUB') }
+
+const baseScenario = { id: '__base', name: 'Как есть', moves: [] }
+const comparison = computed(() => {
+  const list = [baseScenario, ...state.scenarios]
+  return list.map((sc) => {
+    try {
+      const { metrics } = evaluateScenario(state, sc, sc.baseFrom ? { from: sc.baseFrom } : {})
+      return { name: sc.name, metrics, error: null }
+    } catch (e) {
+      return { name: sc.name, metrics: null, error: String(e.message || e) }
+    }
+  })
+})
+function riskClass(r) { return r === 'высокий' ? 'neg' : (r === 'средний' ? 'warn' : 'pos') }
 
 function newScenario() {
   state.scenarios.push({ id: 'scenario_' + Date.now().toString(36), name: 'Новый сценарий', baseFrom: '', moves: [] })
@@ -87,5 +102,48 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
     </div>
 
     <p v-if="!state.scenarios.length" class="card muted">Сценариев пока нет. Создайте первый, чтобы проиграть варианты.</p>
+
+    <div v-if="state.scenarios.length" class="card">
+      <h3 style="margin-top: 0">Сравнение</h3>
+      <div style="overflow-x: auto">
+        <table>
+          <thead>
+            <tr><th>Метрика</th><th v-for="c in comparison" :key="c.name">{{ c.name }}</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="muted small">Мин. остаток</td>
+              <td v-for="c in comparison" :key="c.name" class="mono" :class="c.metrics && c.metrics.minBalance < 0 ? 'neg' : ''">
+                {{ c.metrics ? money(c.metrics.minBalance) : '-' }}
+              </td>
+            </tr>
+            <tr>
+              <td class="muted small">Дата просадки</td>
+              <td v-for="c in comparison" :key="c.name" class="small">{{ c.metrics ? fmtHuman(c.metrics.minBalanceDate) : '-' }}</td>
+            </tr>
+            <tr>
+              <td class="muted small">Переплата (проценты)</td>
+              <td v-for="c in comparison" :key="c.name" class="mono" :class="c.metrics && c.metrics.overpayment > 0 ? 'warn' : 'pos'">
+                {{ c.metrics ? money(c.metrics.overpayment) : '-' }}
+              </td>
+            </tr>
+            <tr>
+              <td class="muted small">Возврат в грейс</td>
+              <td v-for="c in comparison" :key="c.name" class="small">
+                {{ c.metrics ? (c.metrics.graceOk.length ? c.metrics.graceOk.map(g => g ? '✓' : '✗').join(' ') : '-') : '-' }}
+              </td>
+            </tr>
+            <tr>
+              <td class="muted small">В плюс с</td>
+              <td v-for="c in comparison" :key="c.name" class="small">{{ c.metrics && c.metrics.breakEvenDate ? fmtHuman(c.metrics.breakEvenDate) : '-' }}</td>
+            </tr>
+            <tr>
+              <td class="muted small">Риск</td>
+              <td v-for="c in comparison" :key="c.name" :class="c.metrics ? riskClass(c.metrics.risk) : ''">{{ c.metrics ? c.metrics.risk : c.error }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
