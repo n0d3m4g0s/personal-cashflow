@@ -43,6 +43,9 @@ export function migrateCard(card, from = today()) {
   if (c.minPaymentFixed == null) c.minPaymentFixed = { amount: 0, currency: 'RUB' }
   if (c.transferLimit == null) c.transferLimit = { amount: 0, currency: 'RUB' }
   if (c.transferGraceDays == null) c.transferGraceDays = Number(c.gracePeriodDays) || 0
+  if (c.transferGraceEnabled == null) c.transferGraceEnabled = false
+  if (c.transferFeePercent == null) c.transferFeePercent = 0
+  if (c.transferFeeFixed == null) c.transferFeeFixed = { amount: 0, currency: 'RUB' }
   return c
 }
 

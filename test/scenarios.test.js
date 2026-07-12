@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { applyScenario, annuityInterest, cardLoanInterest, evaluateScenario, transferCost } from '../src/scenarios.js'
 import { parseDate } from '../src/finance.js'
+import { migrateCard } from '../src/store.js'
 
 const baseState = () => ({
   settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
@@ -339,4 +340,24 @@ test('evaluateScenario: transfer сверх лимита даёт предупр
   const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
   assert.ok(Array.isArray(metrics.transferWarnings))
   assert.equal(metrics.transferWarnings.length, 1, 'перенос сверх свободного лимита мужа помечен')
+})
+
+test('migrateCard: добивает поля переводов с консервативными дефолтами', () => {
+  const c = migrateCard({
+    name: 'Старая', statementDate: '2026-07-26', dueDate: '2026-08-19', graceEndDate: '2026-08-19',
+    currentDebt: { amount: 0, currency: 'RUB' },
+  }, parseDate('2026-07-18'))
+  assert.equal(c.transferGraceEnabled, false)
+  assert.equal(c.transferFeePercent, 0)
+  assert.deepEqual(c.transferFeeFixed, { amount: 0, currency: 'RUB' })
+})
+
+test('migrateCard: не перетирает заданные поля переводов', () => {
+  const c = migrateCard({
+    name: 'Жена', statementDate: '2026-08-08', dueDate: '2026-09-28', graceEndDate: '2026-09-28',
+    currentDebt: { amount: 0, currency: 'RUB' },
+    transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: { amount: 290, currency: 'RUB' },
+  }, parseDate('2026-07-18'))
+  assert.equal(c.transferGraceEnabled, true)
+  assert.equal(c.transferFeePercent, 2.9)
 })

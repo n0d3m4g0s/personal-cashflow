@@ -45,6 +45,7 @@ export function makeSeed() {
     graceEndDate: monthsAheadDay(1, 28), grace: 55, statementCycleDays: 30,
     minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
     transferLimit: 150000, transferGraceDays: 55,
+    transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: 290,
   })
 
   return {
@@ -95,6 +96,7 @@ export function makeSeed() {
         limit: 238000, statementDate: dayThisMonth(26), dueDate: nextMonthDay(19),
         graceEndDate: nextMonthDay(19), grace: 55, statementCycleDays: 30,
         minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
+        transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: 290,
       }),
       card('Озон Банк', 'Озон Банк', 'husband', {
         limit: 49000, statementDate: nextMonthDay(8), dueDate: nextMonthDay(24),
@@ -184,6 +186,9 @@ function card(name, bank, owner, o) {
     statementBalance: { amount: 0, currency: 'RUB' },
     transferLimit: { amount: o.transferLimit || 0, currency: 'RUB' },
     transferGraceDays: o.transferGraceDays || o.grace || 0,
+    transferGraceEnabled: o.transferGraceEnabled || false,
+    transferFeePercent: o.transferFeePercent || 0,
+    transferFeeFixed: { amount: o.transferFeeFixed || 0, currency: 'RUB' },
     payStrategy: 'full',
     disabled: o.disabled || false,
     note: o.note || 'Заполните текущий долг и сумму выписки, проверьте даты и льготный период',
