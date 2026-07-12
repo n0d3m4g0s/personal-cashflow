@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
   cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
+  cardPaymentSchedule,
 } from '../src/finance.js'
 import { migrateCard } from '../src/store.js'
 
@@ -302,4 +303,45 @@ test('migrateCard: идемпотентна для новой модели', () 
   const c = migrateCard(nw, parseDate('2026-07-12'))
   assert.equal(c.statementDate, '2026-07-26')
   assert.equal(c.dueDate, '2026-08-19')
+})
+
+test('cardPaymentSchedule: minimum даёт ряд платежей, остаток убывает', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    payStrategy: 'minimum',
+    statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+    currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentBase: 'currentDebt',
+    minPaymentPlusInterest: true, apr: 0.624,
+  }
+  const sched = cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2027-07-12'))
+  assert.ok(sched.length >= 2, 'несколько платежей')
+  // остаток убывает монотонно
+  for (let i = 1; i < sched.length; i++) {
+    assert.ok(sched[i].remainingAfter <= sched[i-1].remainingAfter, 'остаток не растёт')
+  }
+  // проценты положительны (apr>0)
+  assert.ok(sched[0].interest > 0)
+})
+
+test('cardPaymentSchedule: долг ≤ 0 → пустой массив', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = { payStrategy: 'minimum', currentDebt: { amount: 0, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+    minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' }, apr: 0.624 }
+  assert.deepEqual(cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2027-07-12')), [])
+})
+
+test('cardPaymentSchedule: обрывается на конце горизонта (хвост остаётся)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  // Уралсиб 3% минимум под 99.9% - долг тает крайне медленно, за короткий горизонт не закроется
+  const card = {
+    payStrategy: 'minimum', statementDate: '2026-08-01', dueDate: '2026-08-30', graceEndDate: '2026-09-30', statementCycleDays: 30,
+    currentDebt: { amount: 19275, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 3, minPaymentFixed: { amount: 300, currency: 'RUB' }, minPaymentBase: 'currentDebt', minPaymentPlusInterest: true, apr: 0.999,
+  }
+  const sched = cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2026-10-12')) // 3 месяца
+  // за 3 месяца долг не закроется, последний remainingAfter > 0
+  assert.ok(sched.length >= 1 && sched.length <= 4)
+  assert.ok(sched[sched.length-1].remainingAfter > 0, 'хвост долга остаётся')
 })

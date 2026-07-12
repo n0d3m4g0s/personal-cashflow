@@ -194,6 +194,36 @@ export function cardMinPayment(card, rates) {
   return Math.min(core + interest, debt)
 }
 
+// Ряд событий погашения карты по стратегии minimum до закрытия долга или конца горизонта.
+// Каждый месяц: проценты на остаток + тело (cardMinCore); остаток уменьшается на тело.
+export function cardPaymentSchedule(card, rates, from, end) {
+  let remaining = cardDebt(card, rates)
+  if (remaining <= 0) return []
+  const apr = Number(card.apr) || 0
+  const days = Number(card.statementCycleDays) || 30
+  const out = []
+  let k = 0
+  let guard = 0
+  while (remaining > 0 && guard < 600) {
+    guard++
+    // due k-го цикла: катим cardCycle от даты k*cycle вперёд
+    const cycleFrom = addDays(from, k * days)
+    const { due } = cardCycle(card, cycleFrom)
+    if (due > end) break
+    const interest = remaining * apr * days / 365
+    const core = cardMinCore(card, remaining, rates)
+    // платёж не больше остатка+проценты (последний платёж гасит всё)
+    const pay = Math.min(core + interest, remaining + interest)
+    const principalPaid = Math.max(0, pay - interest)
+    remaining = Math.max(0, remaining - principalPaid)
+    out.push({ date: due, amount: pay, remainingAfter: remaining, interest })
+    k++
+    // защита: если тело не гасится (платёж <= проценты), прерываем, чтобы не зациклиться
+    if (principalPaid <= 0) break
+  }
+  return out
+}
+
 // Актуальный на дату `from` цикл карты: { statement, due, graceEnd }.
 // Хранимые даты — ISO ближайшего/последнего цикла; если он в прошлом, катим вперёд,
 // сохраняя якорный день выписки и постоянные смещения due/graceEnd (в днях).
