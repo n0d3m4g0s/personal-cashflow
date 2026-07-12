@@ -38,6 +38,15 @@ function monthsAheadDay(months, day) {
 const monthly = (day) => ({ frequency: 'monthly', interval: 1, startDate: dayThisMonth(day), endDate: null })
 
 export function makeSeed() {
+  // Карта жены создаётся заранее, чтобы её id можно было переиспользовать
+  // в сид-сценарии (заём с карты жены) без хардкода.
+  const wifeCard = card('Т-Банк (жена)', 'Т-Банк', 'wife', {
+    limit: 195000, statementDate: nextMonthDay(8), dueDate: monthsAheadDay(1, 28),
+    graceEndDate: monthsAheadDay(1, 28), grace: 55, statementCycleDays: 30,
+    minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
+    transferLimit: 150000, transferGraceDays: 55,
+  })
+
   return {
     version: 1,
     settings: {
@@ -102,12 +111,7 @@ export function makeSeed() {
         graceEndDate: nextMonthDay(5), grace: 120, statementCycleDays: 30,
         minPaymentPercent: 5, minPaymentFixed: 0, apr: 0,
       }),
-      card('Т-Банк (жена)', 'Т-Банк', 'wife', {
-        limit: 195000, statementDate: nextMonthDay(8), dueDate: monthsAheadDay(1, 28),
-        graceEndDate: monthsAheadDay(1, 28), grace: 55, statementCycleDays: 30,
-        minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
-        transferLimit: 150000, transferGraceDays: 55,
-      }),
+      wifeCard,
     ],
 
     // ---- Расходы ----
@@ -145,6 +149,18 @@ export function makeSeed() {
         currentSaved: { amount: 0, currency: 'RUB' },
         targetDate: null, monthlyContribution: { amount: 0, currency: 'RUB' },
         note: 'Укажите реальный остаток по кредиту как цель',
+      },
+    ],
+
+    // ---- Сценарии "что если" ----
+    scenarios: [
+      {
+        id: id('scenario'), name: 'Билеты (заём с карты жены)',
+        baseFrom: dayThisMonth(18),
+        moves: [
+          { type: 'purchase', title: 'Авиабилеты', amount: { amount: 300000, currency: 'RUB' }, date: dayThisMonth(18) },
+          { type: 'cardLoan', cardId: wifeCard.id, amount: { amount: 150000, currency: 'RUB' }, date: dayThisMonth(18), repay: 'auto' },
+        ],
       },
     ],
   }
