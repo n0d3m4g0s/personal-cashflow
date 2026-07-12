@@ -158,7 +158,7 @@ export function makeSeed() {
         id: id('scenario'), name: 'Билеты (заём с карты жены)',
         baseFrom: dayThisMonth(18),
         moves: [
-          { type: 'purchase', title: 'Авиабилеты', amount: { amount: 300000, currency: 'RUB' }, date: dayThisMonth(18) },
+          { type: 'purchase', title: 'Авиабилеты', amount: { amount: 150000, currency: 'RUB' }, date: dayThisMonth(18) },
           { type: 'cardLoan', cardId: wifeCard.id, amount: { amount: 150000, currency: 'RUB' }, date: dayThisMonth(18), repay: 'auto' },
         ],
       },

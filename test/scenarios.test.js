@@ -171,6 +171,18 @@ test('evaluateScenario: ручной возврат использует repayDa
   assert.ok(metrics.overpayment > 0, 'ручной возврат за грейсом даёт проценты')
 })
 
+test('evaluateScenario: ход с пустой датой не роняет, деградирует мягко', () => {
+  const st = baseState()
+  st.cards = [wifeCard()]
+  const scenario = { id: 'x', name: 'Кривой', moves: [
+    { type: 'newLoan', title: 'Без даты', amount: { amount: 90000, currency: 'RUB' }, apr: 0.25, termMonths: 12, startDate: '' },
+    { type: 'cardLoan', cardId: 'card_9', amount: { amount: 150000, currency: 'RUB' }, date: '', repay: 'auto' },
+  ] }
+  // не должно бросать
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  assert.equal(typeof metrics.minBalance, 'number')
+})
+
 test('сквозной: небольшой заём 150k под покупку 150k укладывается в грейс, переплата 0', () => {
   const st = familyState()
   const scenario = { id: 'c', name: 'Малая покупка', baseFrom: '2026-07-18', moves: [

@@ -1,6 +1,6 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
-import { parseDate, fmtISO, addDays, addMonths, buildForecast } from './finance.js'
+import { parseDate, fmtISO, addDays, buildForecast } from './finance.js'
 import { moneyToRub } from './money.js'
 
 let _sid = 0
@@ -66,6 +66,7 @@ export function applyScenario(state, scenario) {
 function applyMove(s, move) {
   switch (move.type) {
     case 'purchase':
+      if (!parseDate(move.date)) break // неполный ход (нет даты) - пропускаем
       s.expenses.push({
         id: sid('sc_exp'), name: move.title || 'Покупка',
         amount: move.amount.amount, currency: move.amount.currency,
@@ -73,6 +74,7 @@ function applyMove(s, move) {
       })
       break
     case 'adjust':
+      if (!parseDate(move.date)) break // неполный ход (нет даты) - пропускаем
       if ((move.sign || 1) >= 0) {
         s.incomes.push({
           id: sid('sc_inc'), name: move.title || 'Доход',
@@ -88,7 +90,9 @@ function applyMove(s, move) {
       }
       break
     case 'newLoan': {
-      const day = parseDate(move.startDate).getDate()
+      const start = parseDate(move.startDate)
+      if (!start) break // неполный ход (нет даты) - пропускаем
+      const day = start.getDate()
       s.loans.push({
         id: sid('sc_loan'), name: move.title || 'Кредит',
         owner: 'family',
@@ -129,8 +133,9 @@ export function evaluateScenario(state, scenario, opts = {}) {
   let cardInterest = 0
   for (const move of cardLoans) {
     const card = forked.cards.find((c) => c.id === move.cardId)
-    const amtRub = moneyToRub(move.amount, rates)
     const loanDate = parseDate(move.date)
+    if (!loanDate || !card) continue // неполный ход или карта удалена - не считаем заём
+    const amtRub = moneyToRub(move.amount, rates)
     let repayDate
     // Ручной возврат: режим 'manual' + отдельное поле repayDate (формат UI-редактора),
     // либо объект { date } (совместимость). Иначе - авто-возврат по порогу ниже.
