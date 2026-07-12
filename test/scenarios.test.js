@@ -294,3 +294,49 @@ test('applyScenario: transfer с несуществующей fromCardId не п
   const out = applyScenario(st, scenario) // не должно бросать
   assert.ok(out)
 })
+
+test('evaluateScenario: перенос долга Озона на карту жены, возврат в грейс → overpayment = комиссия', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const st = {
+    settings: { rates, startingCash: { amount: 238500, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
+    incomes: [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }],
+    expenses: [], loans: [], goals: [], scenarios: [],
+    cards: [
+      { id: 'ozon', name: 'Озон', payStrategy: 'minimum', statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+        currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+        minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentPlusInterest: true, apr: 0.624,
+        transferGraceEnabled: false, transferLimit: { amount: 0, currency: 'RUB' }, transferGraceDays: 0, transferFeePercent: 0, transferFeeFixed: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 49000, currency: 'RUB' } },
+      { id: 'wife', name: 'Жена', payStrategy: 'minimum', statementDate: '2026-08-08', dueDate: '2026-09-28', graceEndDate: '2026-09-28', statementCycleDays: 30,
+        currentDebt: { amount: 0, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+        minPaymentPercent: 14, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 600, currency: 'RUB' }, minPaymentPlusInterest: false, apr: 0.619,
+        transferGraceEnabled: true, transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55, transferFeePercent: 2.9, transferFeeFixed: { amount: 290, currency: 'RUB' }, creditLimit: { amount: 195000, currency: 'RUB' } },
+    ],
+  }
+  const scenario = { id: 'tr', name: 'Перенос Озон→жена', baseFrom: '2026-07-18', moves: [
+    { type: 'transfer', fromCardId: 'ozon', toCardId: 'wife', amount: { amount: 39400, currency: 'RUB' }, date: '2026-07-18', repay: 'auto' },
+  ] }
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  // комиссия карты жены: 2.9% + 290 = 39400*0.029+290 ≈ 1432.6; проценты 0 (в грейс)
+  const fee = 0.029 * 39400 + 290
+  assert.ok(Math.abs(metrics.overpayment - Math.round(fee)) <= 1, `overpayment ${metrics.overpayment} vs ${Math.round(fee)}`)
+})
+
+test('evaluateScenario: transfer сверх лимита даёт предупреждение в metrics.transferWarnings', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const st = {
+    settings: { rates, startingCash: { amount: 238500, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
+    incomes: [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }],
+    expenses: [], loans: [], goals: [], scenarios: [],
+    cards: [
+      { id: 'ozon', name: 'Озон', payStrategy: 'minimum', statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30, currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' }, apr: 0.624, transferGraceEnabled: false, transferLimit: { amount: 0, currency: 'RUB' }, transferGraceDays: 0, transferFeePercent: 0, transferFeeFixed: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 49000, currency: 'RUB' } },
+      { id: 'muzh', name: 'Муж', payStrategy: 'minimum', statementDate: '2026-07-26', dueDate: '2026-08-19', graceEndDate: '2026-08-19', statementCycleDays: 30, currentDebt: { amount: 231684, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, minPaymentPercent: 14, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 600, currency: 'RUB' }, apr: 0.619, transferGraceEnabled: true, transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55, transferFeePercent: 2.9, transferFeeFixed: { amount: 290, currency: 'RUB' }, creditLimit: { amount: 238000, currency: 'RUB' } },
+    ],
+  }
+  // перенос 39400 на карту мужа, где свободно только 238000-231684=6316 → превышение
+  const scenario = { id: 'tr2', name: 'Перенос на мужа', baseFrom: '2026-07-18', moves: [
+    { type: 'transfer', fromCardId: 'ozon', toCardId: 'muzh', amount: { amount: 39400, currency: 'RUB' }, date: '2026-07-18', repay: 'auto' },
+  ] }
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  assert.ok(Array.isArray(metrics.transferWarnings))
+  assert.equal(metrics.transferWarnings.length, 1, 'перенос сверх свободного лимита мужа помечен')
+})

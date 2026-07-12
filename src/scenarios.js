@@ -200,6 +200,43 @@ export function evaluateScenario(state, scenario, opts = {}) {
     cardInterest += cardLoanInterest(card, move.amount, loanDate, repayDate, rates)
   }
 
+  // Ходы переноса долга: возврат нового долга toCardId + цена перевода.
+  const transfers = (scenario.moves || []).filter((m) => m.type === 'transfer')
+  const transferWarnings = []
+  let transferTotal = 0
+  for (const move of transfers) {
+    const toCard = forked.cards.find((c) => c.id === move.toCardId)
+    const transferDate = parseDate(move.date)
+    if (!transferDate || !toCard) continue // неполный ход или карта удалена
+    const amtRub = moneyToRub(move.amount, rates)
+    let repayDate
+    const manualDate = move.repayDate || (move.repay && move.repay.date)
+    if (move.repay !== 'auto' && manualDate) {
+      repayDate = parseDate(manualDate)
+    } else {
+      const probe = buildForecast(forked, { from })
+      repayDate = null
+      for (const day of probe.days) {
+        if (day.date > transferDate && day.balance >= amtRub + buffer) { repayDate = day.date; break }
+      }
+      if (!repayDate) repayDate = probe.end
+    }
+    // Возврат нового долга toCardId деньгами - событие-расход -amount.
+    forked.expenses.push({
+      id: sid('sc_transfer_repay'), name: `Возврат переноса (${move.toCardId})`,
+      amount: move.amount.amount, currency: move.amount.currency,
+      category: 'Сценарий', owner: 'family',
+      schedule: { frequency: 'once', interval: 1, startDate: fmtISO(repayDate), endDate: null },
+    })
+    const cost = transferCost(toCard, move.amount, transferDate, repayDate, rates)
+    transferTotal += cost.total
+    const graceEnd = addDays(transferDate, Number(toCard.transferGraceDays) || 0)
+    graceOk.push(toCard.transferGraceEnabled !== false ? repayDate <= graceEnd : false)
+    if (cost.exceedsLimit) {
+      transferWarnings.push({ toCardId: move.toCardId, amount: amtRub, availableLimit: cost.availableLimit })
+    }
+  }
+
   // проценты по новым кредитам (сумму конвертируем в рубли - overpayment в рублях).
   // Неполные ходы (без валидной даты) пропускаем, как и в applyScenario/цикле займов.
   let loanInterest = 0
@@ -224,7 +261,8 @@ export function evaluateScenario(state, scenario, opts = {}) {
     metrics: {
       minBalance,
       minBalanceDate: forecast.minBalanceDate,
-      overpayment: Math.round(cardInterest + loanInterest),
+      overpayment: Math.round(cardInterest + loanInterest + transferTotal),
+      transferWarnings,
       graceOk,
       breakEvenDate,
       risk,
