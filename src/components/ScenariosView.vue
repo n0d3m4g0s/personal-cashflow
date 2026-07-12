@@ -35,6 +35,7 @@ function addMove(sc, type) {
     cardLoan: { type: 'cardLoan', cardId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, date: '', repay: 'auto', repayDate: '' },
     newLoan: { type: 'newLoan', title: 'Кредит', amount: { amount: 0, currency: 'RUB' }, apr: 0.25, termMonths: 12, startDate: '' },
     adjust: { type: 'adjust', title: 'Корректировка', amount: { amount: 0, currency: 'RUB' }, sign: -1, date: '' },
+    transfer: { type: 'transfer', fromCardId: state.cards[0]?.id || '', toCardId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, date: '', repay: 'auto', repayDate: '' },
   }[type]
   sc.moves.push(JSON.parse(JSON.stringify(blank)))
 }
@@ -62,7 +63,7 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
 
       <div v-for="(m, i) in sc.moves" :key="i" class="card" style="padding: 10px">
         <div class="spread">
-          <b class="small">{{ {purchase:'Крупная покупка', cardLoan:'Заём с карты', newLoan:'Новый кредит', adjust:'Разовый доход/расход'}[m.type] }}</b>
+          <b class="small">{{ {purchase:'Крупная покупка', cardLoan:'Заём с карты', newLoan:'Новый кредит', adjust:'Разовый доход/расход', transfer:'Перенос долга'}[m.type] }}</b>
           <button class="sm ghost" @click="removeMove(sc, i)">✕</button>
         </div>
         <div class="row" v-if="m.type === 'purchase'">
@@ -90,6 +91,16 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
           <select v-model.number="m.sign"><option :value="1">доход +</option><option :value="-1">расход −</option></select>
           <input type="date" v-model="m.date" />
         </div>
+        <div class="row" v-else-if="m.type === 'transfer'">
+          <label class="small muted" style="align-self: center">с</label>
+          <select v-model="m.fromCardId"><option v-for="c in state.cards" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+          <label class="small muted" style="align-self: center">на</label>
+          <select v-model="m.toCardId"><option v-for="c in state.cards" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+          <MoneyInput v-model="m.amount" compact />
+          <input type="date" v-model="m.date" title="Дата переноса" />
+          <select v-model="m.repay"><option value="auto">возврат авто</option><option value="manual">возврат вручную</option></select>
+          <input v-if="m.repay === 'manual'" type="date" v-model="m.repayDate" />
+        </div>
       </div>
 
       <div class="row" style="gap: 6px">
@@ -97,6 +108,7 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
         <button class="sm ghost" @click="addMove(sc, 'cardLoan')">+ Заём с карты</button>
         <button class="sm ghost" @click="addMove(sc, 'newLoan')">+ Кредит</button>
         <button class="sm ghost" @click="addMove(sc, 'adjust')">+ Доход/расход</button>
+        <button class="sm ghost" @click="addMove(sc, 'transfer')">+ Перенос долга</button>
       </div>
     </div>
 
