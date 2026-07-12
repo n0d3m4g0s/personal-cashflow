@@ -83,7 +83,7 @@ function applyMove(s, move) {
       })
       break
     }
-    // cardLoan — Task 3
+    // cardLoan (Task 3)
     default:
       break
   }
