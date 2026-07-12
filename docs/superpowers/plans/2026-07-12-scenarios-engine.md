@@ -464,8 +464,11 @@ export function evaluateScenario(state, scenario, opts = {}) {
     const amtRub = moneyToRub(move.amount, rates)
     const loanDate = parseDate(move.date)
     let repayDate
-    if (move.repay && move.repay !== 'auto' && move.repay.date) {
-      repayDate = parseDate(move.repay.date)
+    // Ручной возврат: режим 'manual' + отдельное поле repayDate (формат UI-редактора),
+    // либо объект { date } (совместимость). Иначе — авто-возврат по порогу ниже.
+    const manualDate = move.repayDate || (move.repay && move.repay.date)
+    if (move.repay !== 'auto' && manualDate) {
+      repayDate = parseDate(manualDate)
     } else {
       // авто: первый день ПОСЛЕ займа, когда на счету есть сумма займа сверх подушки
       // безопасности (balance >= amtRub + buffer) - "вернуть, оставив подушку".
