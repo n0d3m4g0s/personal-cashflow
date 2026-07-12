@@ -137,7 +137,7 @@ function applyMove(s, move) {
       if (!parseDate(move.date)) break // неполный ход (нет даты) - пропускаем
       // Гасим долг fromCardId (долг снят с этой карты этим переносом).
       const from = s.cards.find((c) => c.id === move.fromCardId)
-      if (from) {
+      if (from && from.currentDebt) {
         const inFromCurrency = convert(move.amount.amount, move.amount.currency, from.currentDebt.currency, s.settings.rates)
         from.currentDebt.amount = Math.max(0, from.currentDebt.amount - inFromCurrency)
       }
