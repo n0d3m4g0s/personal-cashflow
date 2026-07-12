@@ -54,7 +54,7 @@ function migrate(s) {
   s.settings.safetyBuffer = s.settings.safetyBuffer || { amount: 0, currency: 'RUB' }
   s.settings.horizonMonths = s.settings.horizonMonths || 6
   s.settings.baseCurrency = 'RUB'
-  for (const k of ['incomes', 'expenses', 'loans', 'cards', 'goals']) {
+  for (const k of ['incomes', 'expenses', 'loans', 'cards', 'goals', 'scenarios']) {
     if (!Array.isArray(s[k])) s[k] = []
   }
   s.cards = (s.cards || []).map((c) => migrateCard(c))
