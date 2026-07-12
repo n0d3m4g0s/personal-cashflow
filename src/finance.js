@@ -325,23 +325,26 @@ export function buildForecast(state, opts = {}) {
     }
   }
 
-  // Кредитки (−) — ОДНО ближайшее обязательство на карту (снимок текущего долга).
+  // Кредитки (−). full: одно обязательство (весь долг в грейс). minimum: ряд платежей.
   for (const card of state.cards || []) {
     if (card.disabled) continue
     const debt = cardDebt(card, rates)
     if (debt <= 0) continue
     const { statement, due, graceEnd } = cardCycle(card, start)
     const full = card.payStrategy !== 'minimum'
-    const amount = full ? debt : cardMinPayment(card, rates)
-    add(due, -amount, 'card', `${card.name} (${full ? 'полное' : 'минимум'})`, {
-      owner: card.owner,
-      bank: card.bank,
-      statementDate: statement,
-      graceDate: graceEnd,
-      strategy: full ? 'full' : 'minimum',
-      minPayment: cardMinPayment(card, rates),
-      fullPayment: debt,
-    })
+    if (full) {
+      add(due, -debt, 'card', `${card.name} (полное)`, {
+        owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
+        strategy: 'full', minPayment: cardMinPayment(card, rates), fullPayment: debt,
+      })
+    } else {
+      for (const p of cardPaymentSchedule(card, rates, start, end)) {
+        add(p.date, -p.amount, 'card', `${card.name} (минимум)`, {
+          owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
+          strategy: 'minimum', remainingAfter: p.remainingAfter, interest: p.interest,
+        })
+      }
+    }
   }
 
   // Сортировка по дате

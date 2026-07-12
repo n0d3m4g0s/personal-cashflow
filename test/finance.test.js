@@ -349,3 +349,36 @@ test('cardPaymentSchedule: обрывается на конце горизонт
   assert.ok(sched.length >= 1 && sched.length <= 4)
   assert.ok(sched[sched.length-1].remainingAfter > 0, 'хвост долга остаётся')
 })
+
+test('buildForecast: карта minimum даёт несколько card-событий (график)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 300000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 12 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Озон', bank: 'Озон', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+      currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentPlusInterest: true, apr: 0.624,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.ok(cardEvents.length >= 2, `ожидали несколько платежей, получили ${cardEvents.length}`)
+})
+
+test('buildForecast: карта full даёт одно событие (регрессия не сломана)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 300000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 12 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Сбер', bank: 'Сбер', owner: 'husband', payStrategy: 'full',
+      statementDate: '2026-07-15', dueDate: '2026-08-05', graceEndDate: '2026-08-05', statementCycleDays: 30,
+      currentDebt: { amount: 20000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 5, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 0, currency: 'RUB' }, apr: 0,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.equal(cardEvents.length, 1, 'full - одно событие')
+  assert.equal(cardEvents[0].amount, -20000)
+})
