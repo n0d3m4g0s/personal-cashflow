@@ -202,13 +202,16 @@ export function cardPaymentSchedule(card, rates, from, end) {
   const apr = Number(card.apr) || 0
   const days = Number(card.statementCycleDays) || 30
   const out = []
+  // Первый due - актуальный цикл на дату from. Дальше катим монотонно помесячно от первого
+  // due (addMonths с якорным днём), а не через cardCycle(from+k*days) - иначе при from, не
+  // совпадающем с датой выписки, due для k=0 и k=1 совпал бы и платежи задвоились на одну дату.
+  const first = cardCycle(card, from)
+  const anchorDay = first.due.getDate()
+  let due = first.due
   let k = 0
   let guard = 0
   while (remaining > 0 && guard < 600) {
     guard++
-    // due k-го цикла: катим cardCycle от даты k*cycle вперёд
-    const cycleFrom = addDays(from, k * days)
-    const { due } = cardCycle(card, cycleFrom)
     if (due > end) break
     const interest = remaining * apr * days / 365
     const core = cardMinCore(card, remaining, rates)
@@ -218,6 +221,7 @@ export function cardPaymentSchedule(card, rates, from, end) {
     remaining = Math.max(0, remaining - principalPaid)
     out.push({ date: due, amount: pay, remainingAfter: remaining, interest })
     k++
+    due = addMonths(first.due, k, anchorDay)
     // защита: если тело не гасится (платёж <= проценты), прерываем, чтобы не зациклиться
     if (principalPaid <= 0) break
   }
