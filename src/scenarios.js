@@ -1,7 +1,6 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
-// parseDate/fmtISO/addMonths используются evaluateScenario (добавляется в Task 4 этапа 2).
-import { parseDate, fmtISO, addDays, addMonths } from './finance.js'
+import { parseDate, fmtISO, addDays, addMonths, buildForecast } from './finance.js'
 import { moneyToRub, convert } from './money.js'
 
 let _sid = 0
@@ -116,5 +115,80 @@ function applyMove(s, move) {
     }
     default:
       break
+  }
+}
+
+// Оценивает сценарий: применяет ходы, разруливает возврат займов, строит прогноз,
+// считает метрики для таблицы сравнения.
+export function evaluateScenario(state, scenario, opts = {}) {
+  const rates = state.settings.rates
+  const from = opts.from || scenario.baseFrom || fmtISO(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()))
+  const startingCash = moneyToRub(state.settings.startingCash, rates)
+
+  const forked = applyScenario(state, scenario)
+  const cardLoans = (scenario.moves || []).filter((m) => m.type === 'cardLoan')
+
+  const graceOk = []
+  let cardInterest = 0
+  for (const move of cardLoans) {
+    const card = forked.cards.find((c) => c.id === move.cardId)
+    const amtRub = moneyToRub(move.amount, rates)
+    const loanDate = parseDate(move.date)
+    let repayDate
+    if (move.repay && move.repay !== 'auto' && move.repay.date) {
+      repayDate = parseDate(move.repay.date)
+    } else {
+      // авто: первый день после займа с balance >= startingCash + amtRub
+      const probe = buildForecast(forked, { from })
+      repayDate = null
+      for (const day of probe.days) {
+        if (day.date > loanDate && day.balance >= startingCash + amtRub) { repayDate = day.date; break }
+      }
+      if (!repayDate) repayDate = probe.end // не закрыт до конца горизонта
+    }
+    // Возврат моделируется ТОЛЬКО событием-расходом (отток кэша на гашение карты).
+    // currentDebt карты НЕ уменьшаем: прирост долга от cardLoan остаётся, чтобы карта
+    // сохраняла обязательство в прогнозе; двойного вычета из cash быть не должно -
+    // событие-расход единственное движение кэша по возврату.
+    forked.expenses.push({
+      id: sid('sc_repay'), name: `Возврат займа (${move.cardId})`,
+      amount: move.amount.amount, currency: move.amount.currency,
+      category: 'Сценарий', owner: 'family',
+      schedule: { frequency: 'once', interval: 1, startDate: fmtISO(repayDate), endDate: null },
+    })
+    const graceEnd = addDays(loanDate, Number(card?.transferGraceDays) || 0)
+    graceOk.push(repayDate <= graceEnd)
+    cardInterest += cardLoanInterest(card, move.amount, loanDate, repayDate, rates)
+  }
+
+  // проценты по новым кредитам
+  let loanInterest = 0
+  for (const m of (scenario.moves || [])) {
+    if (m.type === 'newLoan') loanInterest += annuityInterest(m.amount.amount, m.apr, m.termMonths)
+  }
+
+  const forecast = buildForecast(forked, { from })
+  const buffer = moneyToRub(state.settings.safetyBuffer, rates)
+
+  let breakEvenDate = null
+  for (const day of forecast.days) {
+    if (day.balance >= startingCash) { breakEvenDate = day.date; break }
+  }
+
+  const minBalance = forecast.minBalance
+  let risk = 'низкий'
+  if (minBalance < 0) risk = 'высокий'
+  else if (minBalance < buffer) risk = 'средний'
+
+  return {
+    forecast,
+    metrics: {
+      minBalance,
+      minBalanceDate: forecast.minBalanceDate,
+      overpayment: Math.round(cardInterest + loanInterest),
+      graceOk,
+      breakEvenDate,
+      risk,
+    },
   }
 }

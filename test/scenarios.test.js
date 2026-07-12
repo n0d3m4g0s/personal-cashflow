@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyScenario, annuityInterest, cardLoanInterest } from '../src/scenarios.js'
+import { applyScenario, annuityInterest, cardLoanInterest, evaluateScenario } from '../src/scenarios.js'
 import { parseDate } from '../src/finance.js'
 
 const baseState = () => ({
@@ -97,4 +97,28 @@ test('applyScenario: cardLoan даёт наличные и растит долг
   assert.equal(out.incomes.length, 1)
   assert.equal(out.incomes[0].amount, 150000)
   assert.equal(out.cards[0].currentDebt.amount, 150000)
+})
+
+test('evaluateScenario: билеты с займом карты жены, авто-возврат в грейс → overpayment 0', () => {
+  const st = baseState()
+  st.settings.startingCash = { amount: 238500, currency: 'RUB' }
+  st.incomes = [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }]
+  st.cards = [wifeCard()]
+  const scenario = { id: 'sb', name: 'Билеты', baseFrom: '2026-07-18', moves: [
+    { type: 'purchase', title: 'Билеты', amount: { amount: 240000, currency: 'RUB' }, date: '2026-07-18' },
+    { type: 'cardLoan', cardId: 'card_9', amount: { amount: 150000, currency: 'RUB' }, date: '2026-07-18', repay: 'auto' },
+  ] }
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  assert.equal(typeof metrics.minBalance, 'number')
+  assert.equal(metrics.graceOk[0], true, 'возврат уложился в грейс')
+  assert.equal(metrics.overpayment, 0, 'при возврате в грейс переплата 0')
+  assert.ok(['низкий', 'средний', 'высокий'].includes(metrics.risk))
+})
+
+test('evaluateScenario: базовый сценарий без ходов не падает', () => {
+  const st = baseState()
+  st.incomes = [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }]
+  const { metrics } = evaluateScenario(st, { id: 'base', name: 'Как есть', moves: [] }, { from: '2026-07-18' })
+  assert.equal(metrics.overpayment, 0)
+  assert.deepEqual(metrics.graceOk, [])
 })
