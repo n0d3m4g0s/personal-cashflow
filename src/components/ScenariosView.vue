@@ -1,12 +1,11 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { state } from '../store.js'
 import { evaluateScenario } from '../scenarios.js'
 import { fmtHuman } from '../finance.js'
-import { formatMoney, moneyToRub } from '../money.js'
+import { formatMoney } from '../money.js'
 import MoneyInput from './MoneyInput.vue'
 
-const rates = computed(() => state.settings.rates)
 function money(rub) { return formatMoney(rub, 'RUB') }
 
 const baseScenario = { id: '__base', name: 'Как есть', moves: [] }
