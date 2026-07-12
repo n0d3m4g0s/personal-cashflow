@@ -1,5 +1,5 @@
 // Стартовые данные (префилл). Известное из задачи + базовые бытовые статьи
-// расходов и примеры целей. Суммы/даты, которых мы не знаем, — плейсхолдеры,
+// расходов и примеры целей. Суммы/даты, которых мы не знаем, - плейсхолдеры,
 // помеченные полем note; легко правятся и удаляются в интерфейсе.
 
 import { DEFAULT_RATES } from './money.js'
@@ -45,6 +45,7 @@ export function makeSeed() {
     graceEndDate: monthsAheadDay(1, 28), grace: 55, statementCycleDays: 30,
     minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
     transferLimit: 150000, transferGraceDays: 55,
+    transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: 290,
   })
 
   return {
@@ -87,14 +88,15 @@ export function makeSeed() {
     ],
 
     // ---- Кредитные карты ----
-    // statementDate/dueDate/graceEndDate — явные даты ближайшего цикла (пользователь
-    // подгоняет под себя); statementCycleDays — длина цикла выписки;
+    // statementDate/dueDate/graceEndDate - явные даты ближайшего цикла (пользователь
+    // подгоняет под себя); statementCycleDays - длина цикла выписки;
     // payStrategy: 'full' (гасим выписку, без процентов) | 'minimum' (только минимум).
     cards: [
       card('Т-Банк (муж)', 'Т-Банк', 'husband', {
         limit: 238000, statementDate: dayThisMonth(26), dueDate: nextMonthDay(19),
         graceEndDate: nextMonthDay(19), grace: 55, statementCycleDays: 30,
         minPaymentPercent: 14, minPaymentFixed: 600, apr: 0.619,
+        transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: 290,
       }),
       card('Озон Банк', 'Озон Банк', 'husband', {
         limit: 49000, statementDate: nextMonthDay(8), dueDate: nextMonthDay(24),
@@ -117,10 +119,10 @@ export function makeSeed() {
     // ---- Расходы ----
     expenses: [
       // Известное из задачи
-      expense('Аренда квартиры (Ереван)', 75000, 'RUB', 'Жильё', monthly(1), { note: 'Если платите в драмах — переключите валюту записи на AMD' }),
+      expense('Аренда квартиры (Ереван)', 75000, 'RUB', 'Жильё', monthly(1), { note: 'Если платите в драмах - переключите валюту записи на AMD' }),
       expense('Расходы ИП (Армения)', 15000, 'RUB', 'ИП/Бизнес', monthly(25), { note: 'Уточните сумму: налоги/соцвзносы/бухгалтерия ИП' }),
       expense('Обслуживание счёта и карты (ИП)', 2000, 'RUB', 'ИП/Бизнес', monthly(25), { note: 'Комиссии банка за обслуживание' }),
-      // Базовые бытовые статьи (плейсхолдеры — правьте под себя)
+      // Базовые бытовые статьи (плейсхолдеры - правьте под себя)
       expense('Продукты', 60000, 'RUB', 'Еда', monthly(1)),
       expense('Кафе и рестораны', 15000, 'RUB', 'Еда', monthly(1)),
       expense('Коммуналка, свет, вода', 10000, 'RUB', 'Жильё', monthly(10)),
@@ -141,7 +143,7 @@ export function makeSeed() {
         targetAmount: { amount: 600000, currency: 'RUB' },
         currentSaved: { amount: 150000, currency: 'RUB' },
         targetDate: null, monthlyContribution: { amount: 0, currency: 'RUB' },
-        note: '≈ 3–4 месяца обязательных расходов',
+        note: '≈ 3-4 месяца обязательных расходов',
       },
       {
         id: id('goal'), name: 'Досрочное погашение кредита 27к', priority: 2,
@@ -184,6 +186,9 @@ function card(name, bank, owner, o) {
     statementBalance: { amount: 0, currency: 'RUB' },
     transferLimit: { amount: o.transferLimit || 0, currency: 'RUB' },
     transferGraceDays: o.transferGraceDays || o.grace || 0,
+    transferGraceEnabled: o.transferGraceEnabled || false,
+    transferFeePercent: o.transferFeePercent || 0,
+    transferFeeFixed: { amount: o.transferFeeFixed || 0, currency: 'RUB' },
     payStrategy: 'full',
     disabled: o.disabled || false,
     note: o.note || 'Заполните текущий долг и сумму выписки, проверьте даты и льготный период',

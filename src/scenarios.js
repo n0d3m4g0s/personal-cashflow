@@ -1,7 +1,7 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
 import { parseDate, fmtISO, addDays, buildForecast } from './finance.js'
-import { moneyToRub } from './money.js'
+import { moneyToRub, convert } from './money.js'
 
 let _sid = 0
 const sid = (p = 'sc') => `${p}_${++_sid}`
@@ -33,14 +33,21 @@ export function annuityInterest(principal, apr, termMonths) {
 
 // Переплата по займу с карты (в рублях). free - в пределах беспроцентного лимита
 // перевода, over - сверх лимита (проценты с первого дня). loanDate/repayDate - Date.
+// Если у карты грейс на перевод не действует (transferGraceEnabled === false, как у
+// Озон/Уралсиб) - проценты на всю сумму с первого дня. Иначе (true или поле не задано -
+// совместимость с этапом 2, где у карты жены грейс на перевод есть) - прежняя логика
+// free/over с грейсом.
 export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
   const amt = moneyToRub(amount, rates)
-  const limit = moneyToRub(card.transferLimit, rates)
   const apr = Number(card.apr) || 0
+  const daysTotal = Math.max(0, Math.round((repayDate - loanDate) / 86400000))
+  if (card.transferGraceEnabled === false) {
+    return apr * amt * daysTotal / 365
+  }
+  const limit = moneyToRub(card.transferLimit, rates)
   const free = Math.min(amt, limit)
   const over = Math.max(0, amt - limit)
   const graceEnd = addDays(loanDate, Number(card.transferGraceDays) || 0)
-  const daysTotal = Math.max(0, Math.round((repayDate - loanDate) / 86400000))
   const overInterest = apr * over * daysTotal / 365
   let freeInterest = 0
   if (repayDate > graceEnd) {
@@ -48,6 +55,19 @@ export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
     freeInterest = apr * free * daysOver / 365
   }
   return overInterest + freeInterest
+}
+
+// Цена переноса долга НА карту toCard (в рублях): комиссия + проценты + сведения о лимите.
+// toCard - карта, на которую переезжает долг (она платит). transferDate/repayDate - Date.
+export function transferCost(toCard, amount, transferDate, repayDate, rates) {
+  const amtRub = moneyToRub(amount, rates)
+  const limit = moneyToRub(toCard.transferLimit, rates)
+  const free = moneyToRub(toCard.creditLimit, rates) - moneyToRub(toCard.currentDebt, rates)
+  const availableLimit = Math.min(limit, Math.max(0, free))
+  const exceedsLimit = amtRub > availableLimit
+  const fee = (Number(toCard.transferFeePercent) || 0) / 100 * amtRub + moneyToRub(toCard.transferFeeFixed, rates)
+  const interest = cardLoanInterest(toCard, amount, transferDate, repayDate, rates)
+  return { fee, interest, total: fee + interest, availableLimit, exceedsLimit }
 }
 
 // Применяет сценарий к состоянию, возвращая НОВОЕ состояние (исходник не мутируется).
@@ -113,6 +133,18 @@ function applyMove(s, move) {
       // currentDebt карты не меняем (модель A). Возврат - событие-расход в evaluateScenario.
       break
     }
+    case 'transfer': {
+      if (!parseDate(move.date)) break // неполный ход (нет даты) - пропускаем
+      // Гасим долг fromCardId (долг снят с этой карты этим переносом).
+      const from = s.cards.find((c) => c.id === move.fromCardId)
+      if (from && from.currentDebt) {
+        const inFromCurrency = convert(move.amount.amount, move.amount.currency, from.currentDebt.currency, s.settings.rates)
+        from.currentDebt.amount = Math.max(0, from.currentDebt.amount - inFromCurrency)
+      }
+      // toCardId (долг переезжает): currentDebt НЕ трогаем (модель A). Рост и возврат -
+      // парным событием в evaluateScenario. Наличные не добавляем.
+      break
+    }
     default:
       break
   }
@@ -168,6 +200,43 @@ export function evaluateScenario(state, scenario, opts = {}) {
     cardInterest += cardLoanInterest(card, move.amount, loanDate, repayDate, rates)
   }
 
+  // Ходы переноса долга: возврат нового долга toCardId + цена перевода.
+  const transfers = (scenario.moves || []).filter((m) => m.type === 'transfer')
+  const transferWarnings = []
+  let transferTotal = 0
+  for (const move of transfers) {
+    const toCard = forked.cards.find((c) => c.id === move.toCardId)
+    const transferDate = parseDate(move.date)
+    if (!transferDate || !toCard) continue // неполный ход или карта удалена
+    const amtRub = moneyToRub(move.amount, rates)
+    let repayDate
+    const manualDate = move.repayDate || (move.repay && move.repay.date)
+    if (move.repay !== 'auto' && manualDate) {
+      repayDate = parseDate(manualDate)
+    } else {
+      const probe = buildForecast(forked, { from })
+      repayDate = null
+      for (const day of probe.days) {
+        if (day.date > transferDate && day.balance >= amtRub + buffer) { repayDate = day.date; break }
+      }
+      if (!repayDate) repayDate = probe.end
+    }
+    // Возврат нового долга toCardId деньгами - событие-расход -amount.
+    forked.expenses.push({
+      id: sid('sc_transfer_repay'), name: `Возврат переноса (${move.toCardId})`,
+      amount: move.amount.amount, currency: move.amount.currency,
+      category: 'Сценарий', owner: 'family',
+      schedule: { frequency: 'once', interval: 1, startDate: fmtISO(repayDate), endDate: null },
+    })
+    const cost = transferCost(toCard, move.amount, transferDate, repayDate, rates)
+    transferTotal += cost.total
+    const graceEnd = addDays(transferDate, Number(toCard.transferGraceDays) || 0)
+    graceOk.push(toCard.transferGraceEnabled !== false ? repayDate <= graceEnd : false)
+    if (cost.exceedsLimit) {
+      transferWarnings.push({ toCardId: move.toCardId, amount: amtRub, availableLimit: cost.availableLimit })
+    }
+  }
+
   // проценты по новым кредитам (сумму конвертируем в рубли - overpayment в рублях).
   // Неполные ходы (без валидной даты) пропускаем, как и в applyScenario/цикле займов.
   let loanInterest = 0
@@ -192,7 +261,8 @@ export function evaluateScenario(state, scenario, opts = {}) {
     metrics: {
       minBalance,
       minBalanceDate: forecast.minBalanceDate,
-      overpayment: Math.round(cardInterest + loanInterest),
+      overpayment: Math.round(cardInterest + loanInterest + transferTotal),
+      transferWarnings,
       graceOk,
       breakEvenDate,
       risk,
