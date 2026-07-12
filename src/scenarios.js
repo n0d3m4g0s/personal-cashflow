@@ -1,9 +1,8 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
-// parseDate/fmtISO/addDays/addMonths и moneyToRub используются ходами cardLoan/newLoan
-// и evaluateScenario (добавляются в следующих задачах этапа 2).
+// parseDate/fmtISO/addMonths используются evaluateScenario (добавляется в Task 4 этапа 2).
 import { parseDate, fmtISO, addDays, addMonths } from './finance.js'
-import { moneyToRub } from './money.js'
+import { moneyToRub, convert } from './money.js'
 
 let _sid = 0
 const sid = (p = 'sc') => `${p}_${++_sid}`
@@ -31,6 +30,25 @@ export function annuityInterest(principal, apr, termMonths) {
     if (balance < 0) balance = 0
   }
   return interest
+}
+
+// Переплата по займу с карты (в рублях). free - в пределах беспроцентного лимита
+// перевода, over - сверх лимита (проценты с первого дня). loanDate/repayDate - Date.
+export function cardLoanInterest(card, amount, loanDate, repayDate, rates) {
+  const amt = moneyToRub(amount, rates)
+  const limit = moneyToRub(card.transferLimit, rates)
+  const apr = Number(card.apr) || 0
+  const free = Math.min(amt, limit)
+  const over = Math.max(0, amt - limit)
+  const graceEnd = addDays(loanDate, Number(card.transferGraceDays) || 0)
+  const daysTotal = Math.max(0, Math.round((repayDate - loanDate) / 86400000))
+  const overInterest = apr * over * daysTotal / 365
+  let freeInterest = 0
+  if (repayDate > graceEnd) {
+    const daysOver = Math.round((repayDate - graceEnd) / 86400000)
+    freeInterest = apr * free * daysOver / 365
+  }
+  return overInterest + freeInterest
 }
 
 // Применяет сценарий к состоянию, возвращая НОВОЕ состояние (исходник не мутируется).
@@ -83,7 +101,19 @@ function applyMove(s, move) {
       })
       break
     }
-    // cardLoan (Task 3)
+    case 'cardLoan': {
+      s.incomes.push({
+        id: sid('sc_inc'), name: `Заём с карты (${move.cardId})`,
+        amount: move.amount.amount, currency: move.amount.currency,
+        type: 'other', schedule: onceSchedule(move.date),
+      })
+      const card = s.cards.find((c) => c.id === move.cardId)
+      if (card) {
+        const inCardCurrency = convert(move.amount.amount, move.amount.currency, card.currentDebt.currency, s.settings.rates)
+        card.currentDebt.amount += inCardCurrency
+      }
+      break
+    }
     default:
       break
   }
