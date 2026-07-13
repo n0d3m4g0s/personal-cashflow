@@ -56,19 +56,18 @@ test('cardAdvice: сортировка critical → warning → save', () => {
   }
 })
 
-test('cardAdvice: если есть и critical и save, то critical идёт раньше', () => {
+test('cardAdvice: critical реально появляется и идёт перед save при кассовом разрыве', () => {
   const st = stateWithExpensiveDebt()
-  // Уменьшаем стартовый кэш, чтобы приблизиться к кассовому разрыву
-  st.settings.startingCash = { amount: 5000, currency: 'RUB' }
+  // Гарантированный кассовый разрыв: мало денег И нет дохода, чтобы баланс не восстановился
+  // к дате платежа по карте (иначе доход перекрыл бы дефицит и critical не сработал).
+  st.settings.startingCash = { amount: 10000, currency: 'RUB' }
   st.settings.safetyBuffer = { amount: 50000, currency: 'RUB' }
+  st.incomes = []
   const adv = cardAdvice(st, { from: '2026-07-13' })
   const sevs = adv.map(a => a.severity)
-  const hasCritical = sevs.includes('critical')
-  const hasSave = sevs.includes('save')
-  // если есть и critical и save, то critical должен идти раньше
-  if (hasCritical && hasSave) {
-    const firstCritical = sevs.indexOf('critical')
-    const firstSave = sevs.indexOf('save')
-    assert.ok(firstCritical < firstSave, 'critical должен идти перед save')
-  }
+  // critical ДОЛЖЕН появиться (остаток уходит ниже буфера к платежу карты) - проверка неусловна
+  assert.ok(sevs.includes('critical'), 'при кассовом разрыве должна быть critical-рекомендация')
+  assert.ok(sevs.includes('save'), 'дорогой долг Уралсиба даёт save-рекомендацию')
+  // critical идёт перед первой save (сортировка critical -> warning -> save)
+  assert.ok(sevs.indexOf('critical') < sevs.indexOf('save'), 'critical должен идти перед save')
 })
