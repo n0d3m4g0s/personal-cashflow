@@ -113,9 +113,7 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
 </template>
 
 <style scoped>
-.summary { grid-template-columns: repeat(4, 1fr); }
 .two { grid-template-columns: 1fr 1fr; }
-.stat .big { font-size: 1.5rem; font-weight: 700; margin: 2px 0; }
 .alert-box { border-color: #7c5410; background: linear-gradient(180deg, #2a2010, var(--panel)); }
 .ok-box { border-color: #1f5745; color: var(--green); }
 .goal-mini { padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -123,7 +121,6 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
 .bar { height: 7px; background: #0d1526; border-radius: 999px; margin: 5px 0; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 @media (max-width: 860px) {
-  .summary { grid-template-columns: 1fr 1fr; }
   .two { grid-template-columns: 1fr; }
 }
 </style>
