@@ -149,7 +149,7 @@ export function clearAll() {
       rates: { ...DEFAULT_RATES },
       baseCurrency: 'RUB',
     },
-    incomes: [], expenses: [], loans: [], cards: [], goals: [],
+    incomes: [], expenses: [], loans: [], cards: [], goals: [], scenarios: [],
   }
   for (const key of Object.keys(state)) delete state[key]
   Object.assign(state, empty)

@@ -55,3 +55,20 @@ test('cardAdvice: сортировка critical → warning → save', () => {
     assert.ok(order[adv[i].severity] >= order[adv[i-1].severity], 'severity не убывает по приоритету')
   }
 })
+
+test('cardAdvice: если есть и critical и save, то critical идёт раньше', () => {
+  const st = stateWithExpensiveDebt()
+  // Уменьшаем стартовый кэш, чтобы приблизиться к кассовому разрыву
+  st.settings.startingCash = { amount: 5000, currency: 'RUB' }
+  st.settings.safetyBuffer = { amount: 50000, currency: 'RUB' }
+  const adv = cardAdvice(st, { from: '2026-07-13' })
+  const sevs = adv.map(a => a.severity)
+  const hasCritical = sevs.includes('critical')
+  const hasSave = sevs.includes('save')
+  // если есть и critical и save, то critical должен идти раньше
+  if (hasCritical && hasSave) {
+    const firstCritical = sevs.indexOf('critical')
+    const firstSave = sevs.indexOf('save')
+    assert.ok(firstCritical < firstSave, 'critical должен идти перед save')
+  }
+})
