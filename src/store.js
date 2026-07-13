@@ -37,7 +37,6 @@ export function migrateCard(card, from = today()) {
     c.graceEndDate = grace > 0 ? fmtISO(addDays(statement, grace)) : c.dueDate
   }
   if (c.statementCycleDays == null) c.statementCycleDays = 30
-  if (c.minPaymentBase == null) c.minPaymentBase = 'currentDebt'
   if (c.minPaymentPlusInterest == null) c.minPaymentPlusInterest = false
   if (c.apr == null) c.apr = 0
   if (c.minPaymentFixed == null) c.minPaymentFixed = { amount: 0, currency: 'RUB' }

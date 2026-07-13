@@ -178,7 +178,6 @@ function card(name, bank, owner, o) {
     statementCycleDays: o.statementCycleDays || 30,
     gracePeriodDays: o.grace || 0,
     minPaymentPercent: o.minPaymentPercent ?? 5,
-    minPaymentBase: o.minPaymentBase || 'currentDebt',
     minPaymentFixed: { amount: o.minPaymentFixed || 0, currency: 'RUB' },
     minPaymentPlusInterest: o.minPaymentPlusInterest || false,
     apr: o.apr || 0,

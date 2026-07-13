@@ -171,17 +171,20 @@ export function cardDebt(card, rates) {
   return moneyToRub(hasStatement ? sb : card.currentDebt, rates)
 }
 
-// Обязательный (минимальный) платёж по карте (в рублях) по формуле банка:
-// max(база×%, fixed) + (plusInterest ? проценты : 0), но не больше долга.
+// Тело минимального платежа БЕЗ процентов от произвольного остатка (в рублях):
+// max(% от остатка, фикс), но не больше остатка. Проценты (для minPaymentPlusInterest)
+// начисляются отдельно вызывающим кодом - здесь их нет, чтобы не задваивать в графике.
+export function cardMinCore(card, balanceRub, rates) {
+  const byPct = balanceRub * (Number(card.minPaymentPercent) || 0) / 100
+  const fixed = moneyToRub(card.minPaymentFixed, rates)
+  return Math.min(Math.max(byPct, fixed), Math.max(0, balanceRub))
+}
+
+// Обязательный (минимальный) платёж по карте (в рублях): тело (cardMinCore) + проценты,
+// если minPaymentPlusInterest, но не больше долга.
 export function cardMinPayment(card, rates) {
   const debt = cardDebt(card, rates)
-  const base = card.minPaymentBase === 'statement'
-    ? moneyToRub(card.statementBalance, rates)
-    : moneyToRub(card.currentDebt, rates)
-  const pct = (Number(card.minPaymentPercent) || 0) / 100
-  const byPct = base * pct
-  const fixed = moneyToRub(card.minPaymentFixed, rates)
-  const core = Math.max(byPct, fixed)
+  const core = cardMinCore(card, debt, rates)
   let interest = 0
   if (card.minPaymentPlusInterest) {
     const apr = Number(card.apr) || 0
@@ -189,6 +192,40 @@ export function cardMinPayment(card, rates) {
     interest = debt * apr * days / 365
   }
   return Math.min(core + interest, debt)
+}
+
+// Ряд событий погашения карты по стратегии minimum до закрытия долга или конца горизонта.
+// Каждый месяц: проценты на остаток + тело (cardMinCore); остаток уменьшается на тело.
+export function cardPaymentSchedule(card, rates, from, end) {
+  let remaining = cardDebt(card, rates)
+  if (remaining <= 0) return []
+  const apr = Number(card.apr) || 0
+  const days = Number(card.statementCycleDays) || 30
+  const out = []
+  // Первый due - актуальный цикл на дату from. Дальше катим монотонно помесячно от первого
+  // due (addMonths с якорным днём), а не через cardCycle(from+k*days) - иначе при from, не
+  // совпадающем с датой выписки, due для k=0 и k=1 совпал бы и платежи задвоились на одну дату.
+  const first = cardCycle(card, from)
+  const anchorDay = first.due.getDate()
+  let due = first.due
+  let k = 0
+  let guard = 0
+  while (remaining > 0 && guard < 600) {
+    guard++
+    if (due > end) break
+    const interest = remaining * apr * days / 365
+    const core = cardMinCore(card, remaining, rates)
+    // платёж не больше остатка+проценты (последний платёж гасит всё)
+    const pay = Math.min(core + interest, remaining + interest)
+    const principalPaid = Math.max(0, pay - interest)
+    remaining = Math.max(0, remaining - principalPaid)
+    out.push({ date: due, amount: pay, remainingAfter: remaining, interest })
+    k++
+    due = addMonths(first.due, k, anchorDay)
+    // защита: если тело не гасится (платёж <= проценты), прерываем, чтобы не зациклиться
+    if (principalPaid <= 0) break
+  }
+  return out
 }
 
 // Актуальный на дату `from` цикл карты: { statement, due, graceEnd }.
@@ -288,23 +325,26 @@ export function buildForecast(state, opts = {}) {
     }
   }
 
-  // Кредитки (−) — ОДНО ближайшее обязательство на карту (снимок текущего долга).
+  // Кредитки (−). full: одно обязательство (весь долг в грейс). minimum: ряд платежей.
   for (const card of state.cards || []) {
     if (card.disabled) continue
     const debt = cardDebt(card, rates)
     if (debt <= 0) continue
     const { statement, due, graceEnd } = cardCycle(card, start)
     const full = card.payStrategy !== 'minimum'
-    const amount = full ? debt : cardMinPayment(card, rates)
-    add(due, -amount, 'card', `${card.name} (${full ? 'полное' : 'минимум'})`, {
-      owner: card.owner,
-      bank: card.bank,
-      statementDate: statement,
-      graceDate: graceEnd,
-      strategy: full ? 'full' : 'minimum',
-      minPayment: cardMinPayment(card, rates),
-      fullPayment: debt,
-    })
+    if (full) {
+      add(due, -debt, 'card', `${card.name} (полное)`, {
+        owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
+        strategy: 'full', minPayment: cardMinPayment(card, rates), fullPayment: debt,
+      })
+    } else {
+      for (const p of cardPaymentSchedule(card, rates, start, end)) {
+        add(p.date, -p.amount, 'card', `${card.name} (минимум)`, {
+          owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
+          strategy: 'minimum', remainingAfter: p.remainingAfter, interest: p.interest,
+        })
+      }
+    }
   }
 
   // Сортировка по дате

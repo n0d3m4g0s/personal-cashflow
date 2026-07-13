@@ -3,7 +3,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
-  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardDebt, buildMonthly,
+  cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
+  cardPaymentSchedule,
 } from '../src/finance.js'
 import { migrateCard } from '../src/store.js'
 
@@ -195,6 +196,29 @@ test('cardMinPayment: не больше долга', () => {
   assert.equal(cardMinPayment(card, rates), 500)
 })
 
+test('cardMinCore: тело минимума без процентов от произвольного остатка', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = { minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' } }
+  // 4% от 50000 = 2000 (> фикс 400) → 2000. Процентов НЕТ (это core).
+  assert.equal(cardMinCore(card, 50000, rates), 2000)
+  // 4% от 5000 = 200 (< фикс 400) → 400.
+  assert.equal(cardMinCore(card, 5000, rates), 400)
+  // кламп до остатка: 4% от 300 = 12, фикс 400, но остаток 300 → 300.
+  assert.equal(cardMinCore(card, 300, rates), 300)
+})
+
+test('cardMinPayment: регрессия после рефактора, прежний результат (Озон 4%+проценты)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' },
+    minPaymentPlusInterest: true, apr: 0.624, statementCycleDays: 30,
+  }
+  // core = max(1576, 400) = 1576; проценты = 39400×0.624×30/365 ≈ 2020.6; итого ≈ 3596.6
+  const interest = 39400 * 0.624 * 30 / 365
+  assert.ok(Math.abs(cardMinPayment(card, rates) - (1576 + interest)) < 1)
+})
+
 test('cardDebt: statementBalance=0 → берёт currentDebt (корень бага прогноза)', () => {
   const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
   const card = {
@@ -265,7 +289,6 @@ test('migrateCard: синтезирует даты из старой модел�
   assert.ok(c.dueDate, 'должна появиться дата платежа')
   assert.ok(c.graceEndDate)
   assert.equal(c.statementCycleDays, 30)
-  assert.equal(c.minPaymentBase, 'currentDebt')
   // dueDate строго после statementDate
   assert.ok(parseDate(c.dueDate) > parseDate(c.statementDate))
 })
@@ -279,4 +302,82 @@ test('migrateCard: идемпотентна для новой модели', () 
   const c = migrateCard(nw, parseDate('2026-07-12'))
   assert.equal(c.statementDate, '2026-07-26')
   assert.equal(c.dueDate, '2026-08-19')
+})
+
+test('cardPaymentSchedule: minimum даёт ряд платежей, остаток убывает', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = {
+    payStrategy: 'minimum',
+    statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+    currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentBase: 'currentDebt',
+    minPaymentPlusInterest: true, apr: 0.624,
+  }
+  const sched = cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2027-07-12'))
+  assert.ok(sched.length >= 2, 'несколько платежей')
+  // остаток убывает монотонно
+  for (let i = 1; i < sched.length; i++) {
+    assert.ok(sched[i].remainingAfter <= sched[i-1].remainingAfter, 'остаток не растёт')
+  }
+  // проценты положительны (apr>0)
+  assert.ok(sched[0].interest > 0)
+  // ДАТЫ СТРОГО РАСТУТ - нет дублей
+  for (let i = 1; i < sched.length; i++) {
+    assert.ok(sched[i].date > sched[i-1].date, `дата ${fmtISO(sched[i].date)} должна быть строго позже предыдущей`)
+  }
+})
+
+test('cardPaymentSchedule: долг ≤ 0 → пустой массив', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const card = { payStrategy: 'minimum', currentDebt: { amount: 0, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+    minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' }, apr: 0.624 }
+  assert.deepEqual(cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2027-07-12')), [])
+})
+
+test('cardPaymentSchedule: обрывается на конце горизонта (хвост остаётся)', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  // Уралсиб 3% минимум под 99.9% - долг тает крайне медленно, за короткий горизонт не закроется
+  const card = {
+    payStrategy: 'minimum', statementDate: '2026-08-01', dueDate: '2026-08-30', graceEndDate: '2026-09-30', statementCycleDays: 30,
+    currentDebt: { amount: 19275, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+    minPaymentPercent: 3, minPaymentFixed: { amount: 300, currency: 'RUB' }, minPaymentBase: 'currentDebt', minPaymentPlusInterest: true, apr: 0.999,
+  }
+  const sched = cardPaymentSchedule(card, rates, parseDate('2026-07-12'), parseDate('2026-10-12')) // 3 месяца
+  // за 3 месяца долг не закроется, последний remainingAfter > 0
+  assert.ok(sched.length >= 1 && sched.length <= 4)
+  assert.ok(sched[sched.length-1].remainingAfter > 0, 'хвост долга остаётся')
+})
+
+test('buildForecast: карта minimum даёт несколько card-событий (график)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 300000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 12 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Озон', bank: 'Озон', owner: 'husband', payStrategy: 'minimum',
+      statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+      currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 4, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentPlusInterest: true, apr: 0.624,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.ok(cardEvents.length >= 2, `ожидали несколько платежей, получили ${cardEvents.length}`)
+})
+
+test('buildForecast: карта full даёт одно событие (регрессия не сломана)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4.6, usdPerRub: 0.0125 }, startingCash: { amount: 300000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 12 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [{
+      name: 'Сбер', bank: 'Сбер', owner: 'husband', payStrategy: 'full',
+      statementDate: '2026-07-15', dueDate: '2026-08-05', graceEndDate: '2026-08-05', statementCycleDays: 30,
+      currentDebt: { amount: 20000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' },
+      minPaymentPercent: 5, minPaymentBase: 'currentDebt', minPaymentFixed: { amount: 0, currency: 'RUB' }, apr: 0,
+    }],
+  }
+  const f = buildForecast(state, { from: '2026-07-12' })
+  const cardEvents = f.events.filter((e) => e.kind === 'card')
+  assert.equal(cardEvents.length, 1, 'full - одно событие')
+  assert.equal(cardEvents[0].amount, -20000)
 })
