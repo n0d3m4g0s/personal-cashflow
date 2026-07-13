@@ -415,6 +415,21 @@ test('cardsSummary: агрегаты по нескольким картам', ()
   assert.equal(s.perCard[0].debt, 39400)
 })
 
+test('cardsSummary: full-карта в perCard показывает весь долг как ближайший платёж', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = {
+    settings: { rates, horizonMonths: 6 }, incomes: [], expenses: [], loans: [], goals: [],
+    cards: [
+      { id: 'sber', name: 'Сбер', bank: 'Сбер', payStrategy: 'full', statementDate: '2026-07-15', dueDate: '2026-08-05', graceEndDate: '2026-08-05', statementCycleDays: 30,
+        currentDebt: { amount: 20000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 20000, currency: 'RUB' },
+        minPaymentPercent: 5, minPaymentFixed: { amount: 0, currency: 'RUB' }, apr: 0 },
+    ],
+  }
+  const s = cardsSummary(state, { from: '2026-07-12' })
+  // full-карта гасится целиком в грейс → nextPayment = весь долг, а не минимум
+  assert.equal(s.perCard[0].nextPayment, 20000)
+})
+
 test('cardsSummary: пустое состояние → нули', () => {
   const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
   const state = { settings: { rates, horizonMonths: 6 }, incomes: [], expenses: [], loans: [], goals: [], cards: [] }

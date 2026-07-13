@@ -322,7 +322,7 @@ export function cardsSummary(state, opts = {}) {
     const { due, graceEnd } = cardCycle(card, start)
     perCard.push({
       id: card.id, name: card.name, bank: card.bank,
-      debt, nextPayment: cardMinPayment(card, rates), nextDate: due, graceEnd,
+      debt, nextPayment: full ? debt : cardMinPayment(card, rates), nextDate: due, graceEnd,
       freeLimit: free, transferableFree: card.transferGraceEnabled ? cardTransferableFree(card, rates) : 0,
       apr: Number(card.apr) || 0, strategy: full ? 'full' : 'minimum',
     })
