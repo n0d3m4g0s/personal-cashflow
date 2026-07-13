@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard.vue'
 import ForecastView from './components/ForecastView.vue'
 import GoalsView from './components/GoalsView.vue'
 import CardsView from './components/CardsView.vue'
+import CardStrategyView from './components/CardStrategyView.vue'
 import LoansView from './components/LoansView.vue'
 import IncomeView from './components/IncomeView.vue'
 import ExpensesView from './components/ExpensesView.vue'
@@ -18,6 +19,7 @@ const tabs = [
   { key: 'goals', label: 'Цели', icon: '🎯', comp: GoalsView },
   { key: 'scenarios', label: 'Сценарии', icon: '🎲', comp: ScenariosView },
   { key: 'cards', label: 'Кредитки', icon: '💳', comp: CardsView },
+  { key: 'cardStrategy', label: 'Стратегия', icon: '🧮', comp: CardStrategyView },
   { key: 'loans', label: 'Кредиты', icon: '🏦', comp: LoansView },
   { key: 'income', label: 'Доходы', icon: '💰', comp: IncomeView },
   { key: 'expenses', label: 'Расходы', icon: '🧾', comp: ExpensesView },

@@ -275,6 +275,62 @@ export function cardNextDue(card, from = today()) {
   return { statement: from, due: from }
 }
 
+// Свободный лимит перевода на карту (в рублях): min(беспроцентный лимит, свободный лимит).
+function cardTransferableFree(card, rates) {
+  const limit = moneyToRub(card.transferLimit, rates)
+  const free = moneyToRub(card.creditLimit, rates) - moneyToRub(card.currentDebt, rates)
+  return Math.min(limit, Math.max(0, free))
+}
+
+// Сводка по всем картам: агрегаты для вкладки "Карты: стратегия".
+export function cardsSummary(state, opts = {}) {
+  const rates = state.settings.rates
+  const start = opts.from ? parseDate(opts.from) : today()
+  const horizonMonths = opts.horizonMonths ?? state.settings.horizonMonths ?? 6
+  const end = addMonths(start, horizonMonths, start.getDate())
+
+  let totalInterest = 0, monthlyMin = 0, totalDebt = 0
+  let debtInGrace = 0, debtUnderInterest = 0
+  let totalFreeLimit = 0, transferableFree = 0
+  const perCard = []
+
+  for (const card of state.cards || []) {
+    if (card.disabled) continue
+    // свободный лимит - по всем активным картам
+    const free = Math.max(0, moneyToRub(card.creditLimit, rates) - moneyToRub(card.currentDebt, rates))
+    totalFreeLimit += free
+    if (card.transferGraceEnabled) transferableFree += cardTransferableFree(card, rates)
+
+    const debt = cardDebt(card, rates)
+    if (debt <= 0) continue
+    totalDebt += debt
+    monthlyMin += cardMinPayment(card, rates)
+
+    const full = card.payStrategy !== 'minimum'
+    if (full) {
+      // full-карта: долг в грейсе, если grace не вышел; иначе под процентами
+      const { graceEnd } = cardCycle(card, start)
+      if (graceEnd >= start) debtInGrace += debt
+      else debtUnderInterest += debt
+    } else {
+      // minimum: под процентами; проценты за горизонт из графика
+      debtUnderInterest += debt
+      const sched = cardPaymentSchedule(card, rates, start, end)
+      for (const p of sched) totalInterest += p.interest
+    }
+
+    const { due, graceEnd } = cardCycle(card, start)
+    perCard.push({
+      id: card.id, name: card.name, bank: card.bank,
+      debt, nextPayment: full ? debt : cardMinPayment(card, rates), nextDate: due, graceEnd,
+      freeLimit: free, transferableFree: card.transferGraceEnabled ? cardTransferableFree(card, rates) : 0,
+      apr: Number(card.apr) || 0, strategy: full ? 'full' : 'minimum',
+    })
+  }
+
+  return { totalInterest, monthlyMin, totalDebt, debtInGrace, debtUnderInterest, totalFreeLimit, transferableFree, perCard }
+}
+
 // ---------- Движок прогноза ----------
 // Возвращает { events, days, alerts, monthly } — таймлайн с нарастающим остатком.
 

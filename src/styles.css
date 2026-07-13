@@ -113,6 +113,13 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
   box-shadow: var(--shadow);
 }
 
+.summary { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat .big { font-size: 1.5rem; font-weight: 700; margin: 2px 0; }
+
+@media (max-width: 860px) {
+  .summary { grid-template-columns: 1fr 1fr; }
+}
+
 @media (max-width: 640px) {
   body { font-size: 14px; }
   .card { padding: 14px; }

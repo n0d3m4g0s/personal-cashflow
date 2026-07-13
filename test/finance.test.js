@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
   cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
-  cardPaymentSchedule,
+  cardPaymentSchedule, cardsSummary,
 } from '../src/finance.js'
 import { migrateCard } from '../src/store.js'
 
@@ -380,4 +380,62 @@ test('buildForecast: карта full даёт одно событие (регр�
   const cardEvents = f.events.filter((e) => e.kind === 'card')
   assert.equal(cardEvents.length, 1, 'full - одно событие')
   assert.equal(cardEvents[0].amount, -20000)
+})
+
+test('cardsSummary: агрегаты по нескольким картам', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = {
+    settings: { rates, startingCash: { amount: 100000, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' }, horizonMonths: 6 },
+    incomes: [], expenses: [], loans: [], goals: [],
+    cards: [
+      { id: 'ozon', name: 'Озон', bank: 'Озон', payStrategy: 'minimum', statementDate: '2026-08-08', dueDate: '2026-08-24', graceEndDate: '2026-09-08', statementCycleDays: 30,
+        currentDebt: { amount: 39400, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 49000, currency: 'RUB' },
+        minPaymentPercent: 4, minPaymentFixed: { amount: 400, currency: 'RUB' }, minPaymentPlusInterest: true, apr: 0.624,
+        transferGraceEnabled: false, transferLimit: { amount: 0, currency: 'RUB' }, transferGraceDays: 0 },
+      { id: 'wife', name: 'Жена', bank: 'Т-Банк', payStrategy: 'minimum', statementDate: '2026-08-08', dueDate: '2026-09-28', graceEndDate: '2026-09-28', statementCycleDays: 30,
+        currentDebt: { amount: 0, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 195000, currency: 'RUB' },
+        minPaymentPercent: 14, minPaymentFixed: { amount: 600, currency: 'RUB' }, minPaymentPlusInterest: false, apr: 0.619,
+        transferGraceEnabled: true, transferLimit: { amount: 150000, currency: 'RUB' }, transferGraceDays: 55 },
+    ],
+  }
+  const s = cardsSummary(state, { from: '2026-07-12' })
+  // totalDebt = 39400 (у жены долг 0, пропущена)
+  assert.equal(s.totalDebt, 39400)
+  // monthlyMin > 0 (у Озона есть минимум)
+  assert.ok(s.monthlyMin > 0)
+  // totalInterest > 0 (Озон minimum под 62.4%)
+  assert.ok(s.totalInterest > 0)
+  // totalFreeLimit по всем активным картам: Озон 49000-39400=9600 + жена 195000-0=195000 = 204600.
+  assert.equal(s.totalFreeLimit, 204600)
+  // transferableFree: только карты с transferGraceEnabled - жена. min(150000, 195000-0)=150000.
+  assert.equal(s.transferableFree, 150000)
+  // perCard: только карты с долгом (Озон)
+  assert.equal(s.perCard.length, 1)
+  assert.equal(s.perCard[0].id, 'ozon')
+  assert.equal(s.perCard[0].debt, 39400)
+})
+
+test('cardsSummary: full-карта в perCard показывает весь долг как ближайший платёж', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = {
+    settings: { rates, horizonMonths: 6 }, incomes: [], expenses: [], loans: [], goals: [],
+    cards: [
+      { id: 'sber', name: 'Сбер', bank: 'Сбер', payStrategy: 'full', statementDate: '2026-07-15', dueDate: '2026-08-05', graceEndDate: '2026-08-05', statementCycleDays: 30,
+        currentDebt: { amount: 20000, currency: 'RUB' }, statementBalance: { amount: 0, currency: 'RUB' }, creditLimit: { amount: 20000, currency: 'RUB' },
+        minPaymentPercent: 5, minPaymentFixed: { amount: 0, currency: 'RUB' }, apr: 0 },
+    ],
+  }
+  const s = cardsSummary(state, { from: '2026-07-12' })
+  // full-карта гасится целиком в грейс → nextPayment = весь долг, а не минимум
+  assert.equal(s.perCard[0].nextPayment, 20000)
+})
+
+test('cardsSummary: пустое состояние → нули', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const state = { settings: { rates, horizonMonths: 6 }, incomes: [], expenses: [], loans: [], goals: [], cards: [] }
+  const s = cardsSummary(state, { from: '2026-07-12' })
+  assert.equal(s.totalDebt, 0)
+  assert.equal(s.totalInterest, 0)
+  assert.equal(s.monthlyMin, 0)
+  assert.deepEqual(s.perCard, [])
 })
