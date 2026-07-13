@@ -65,6 +65,10 @@ function migrate(s) {
 
 export const state = reactive(load())
 
+// Навигация: активная вкладка (для переключения из компонентов).
+export const nav = reactive({ active: 'dashboard' })
+export function goTab(key) { nav.active = key }
+
 let saveTimer = null
 watch(
   state,
