@@ -19,7 +19,7 @@ function blank() {
     name: '', bank: '', owner: 'husband',
     creditLimit: { amount: 0, currency: 'RUB' },
     statementDate: '', dueDate: '', graceEndDate: '', statementCycleDays: 30,
-    minPaymentPercent: 5, minPaymentBase: 'currentDebt',
+    minPaymentPercent: 5,
     minPaymentFixed: { amount: 0, currency: 'RUB' }, minPaymentPlusInterest: false, apr: 0,
     currentDebt: { amount: 0, currency: 'RUB' },
     statementBalance: { amount: 0, currency: 'RUB' },
@@ -123,12 +123,6 @@ function ownerLabel(o) { return OWNERS.find((x) => x.value === o)?.label || o }
           <div style="flex: 1"><label>Мин. платёж, не менее</label><MoneyInput v-model="editing.minPaymentFixed" compact /></div>
         </div>
         <div class="row">
-          <div style="flex: 1"><label>Считать % от</label>
-            <select v-model="editing.minPaymentBase">
-              <option value="currentDebt">текущего долга</option>
-              <option value="statement">суммы выписки</option>
-            </select>
-          </div>
           <div style="flex: 1"><label>Ставка, % годовых</label><input type="number" min="0" step="0.1" :value="(editing.apr * 100)" @input="editing.apr = (parseFloat($event.target.value) || 0) / 100" /></div>
           <div style="flex: 1; display: flex; align-items: flex-end">
             <label style="margin: 0"><input type="checkbox" style="width: auto" v-model="editing.minPaymentPlusInterest" /> +проценты в минплатёж</label>
