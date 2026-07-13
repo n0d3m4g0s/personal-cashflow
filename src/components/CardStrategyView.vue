@@ -1,11 +1,13 @@
 <script setup>
 import { computed } from 'vue'
-import { state } from '../store.js'
+import { state, goTab } from '../store.js'
 import { cardsSummary, buildForecast, fmtHuman } from '../finance.js'
 import { formatMoney } from '../money.js'
+import { cardAdvice } from '../advice.js'
 
 const summary = computed(() => cardsSummary(state))
 const forecast = computed(() => buildForecast(state))
+const advice = computed(() => cardAdvice(state))
 
 function money(rub) { return formatMoney(rub, 'RUB') }
 
@@ -14,6 +16,18 @@ const cardEvents = computed(() =>
   forecast.value.events.filter((e) => e.kind === 'card').slice(0, 30)
 )
 function pct(apr) { return (apr * 100).toFixed(1) + '%' }
+
+// Создаёт сценарий из хода рекомендации и переключает на вкладку "Сценарии".
+function playInScenarios(rec) {
+  if (!rec.action) return
+  state.scenarios.push({
+    id: 'scenario_' + Date.now().toString(36),
+    name: rec.title, baseFrom: rec.action.date || '', moves: [rec.action],
+  })
+  goTab('scenarios')
+}
+function sevIcon(s) { return { critical: '🔴', warning: '🟡', save: '💡' }[s] || '•' }
+function sevClass(s) { return { critical: 'neg', warning: 'warn', save: 'pos' }[s] || '' }
 </script>
 
 <template>
@@ -46,6 +60,23 @@ function pct(apr) { return (apr * 100).toFixed(1) + '%' }
         <div class="small muted">беспроцентно переводимо {{ money(summary.transferableFree) }}</div>
       </div>
     </section>
+
+    <!-- Рекомендации -->
+    <div class="card">
+      <h3 style="margin-top: 0">Рекомендации</h3>
+      <div v-if="advice.length" class="grid" style="gap: 10px">
+        <div v-for="(rec, i) in advice" :key="i" class="rec-row">
+          <div class="spread">
+            <div>
+              <b :class="sevClass(rec.severity)">{{ sevIcon(rec.severity) }} {{ rec.title }}</b>
+              <div class="small muted">{{ rec.why }}</div>
+            </div>
+            <button v-if="rec.action" class="sm ghost" @click="playInScenarios(rec)">Проиграть в Сценариях</button>
+          </div>
+        </div>
+      </div>
+      <p v-else class="muted">Срочных рекомендаций нет.</p>
+    </div>
 
     <!-- Календарь обязательств -->
     <div class="card">
@@ -85,3 +116,8 @@ function pct(apr) { return (apr * 100).toFixed(1) + '%' }
     </div>
   </div>
 </template>
+
+<style scoped>
+.rec-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.rec-row:last-child { border-bottom: none; }
+</style>

@@ -65,6 +65,10 @@ function migrate(s) {
 
 export const state = reactive(load())
 
+// Навигация: активная вкладка (для переключения из компонентов).
+export const nav = reactive({ active: 'dashboard' })
+export function goTab(key) { nav.active = key }
+
 let saveTimer = null
 watch(
   state,
@@ -145,7 +149,7 @@ export function clearAll() {
       rates: { ...DEFAULT_RATES },
       baseCurrency: 'RUB',
     },
-    incomes: [], expenses: [], loans: [], cards: [], goals: [],
+    incomes: [], expenses: [], loans: [], cards: [], goals: [], scenarios: [],
   }
   for (const key of Object.keys(state)) delete state[key]
   Object.assign(state, empty)

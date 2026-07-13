@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { state } from './store.js'
+import { computed } from 'vue'
+import { state, nav } from './store.js'
 import { moneyToRub } from './money.js'
 import Dashboard from './components/Dashboard.vue'
 import ForecastView from './components/ForecastView.vue'
@@ -26,8 +26,7 @@ const tabs = [
   { key: 'settings', label: 'Настройки', icon: '⚙️', comp: SettingsView },
 ]
 
-const active = ref('dashboard')
-const current = computed(() => tabs.find((t) => t.key === active.value)?.comp)
+const current = computed(() => tabs.find((t) => t.key === nav.active)?.comp)
 </script>
 
 <template>
@@ -45,8 +44,8 @@ const current = computed(() => tabs.find((t) => t.key === active.value)?.comp)
           v-for="t in tabs"
           :key="t.key"
           class="tab"
-          :class="{ active: active === t.key }"
-          @click="active = t.key"
+          :class="{ active: nav.active === t.key }"
+          @click="nav.active = t.key"
         >
           <span class="tab-icon">{{ t.icon }}</span>
           <span class="tab-label">{{ t.label }}</span>
