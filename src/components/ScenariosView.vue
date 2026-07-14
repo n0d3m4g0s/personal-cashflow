@@ -36,6 +36,7 @@ function addMove(sc, type) {
     newLoan: { type: 'newLoan', title: 'Кредит', amount: { amount: 0, currency: 'RUB' }, apr: 0.25, termMonths: 12, startDate: '' },
     adjust: { type: 'adjust', title: 'Корректировка', amount: { amount: 0, currency: 'RUB' }, sign: -1, date: '' },
     transfer: { type: 'transfer', fromCardId: state.cards[0]?.id || '', toCardId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, date: '', repay: 'auto', repayDate: '' },
+    carousel: { type: 'carousel', cardAId: state.cards[0]?.id || '', cardBId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, startDate: '' },
   }[type]
   sc.moves.push(JSON.parse(JSON.stringify(blank)))
 }
@@ -63,7 +64,7 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
 
       <div v-for="(m, i) in sc.moves" :key="i" class="card" style="padding: 10px">
         <div class="spread">
-          <b class="small">{{ {purchase:'Крупная покупка', cardLoan:'Заём с карты', newLoan:'Новый кредит', adjust:'Разовый доход/расход', transfer:'Перенос долга'}[m.type] }}</b>
+          <b class="small">{{ {purchase:'Крупная покупка', cardLoan:'Заём с карты', newLoan:'Новый кредит', adjust:'Разовый доход/расход', transfer:'Перенос долга', carousel:'Карусель переливов'}[m.type] }}</b>
           <button class="sm ghost" @click="removeMove(sc, i)">✕</button>
         </div>
         <div class="row" v-if="m.type === 'purchase'">
@@ -101,6 +102,14 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
           <select v-model="m.repay"><option value="auto">возврат авто</option><option value="manual">возврат вручную</option></select>
           <input v-if="m.repay === 'manual'" type="date" v-model="m.repayDate" />
         </div>
+        <div class="row" v-else-if="m.type === 'carousel'">
+          <label class="small muted" style="align-self: center">крутим между</label>
+          <select v-model="m.cardAId"><option v-for="c in state.cards" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+          <label class="small muted" style="align-self: center">и</label>
+          <select v-model="m.cardBId"><option v-for="c in state.cards" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+          <MoneyInput v-model="m.amount" compact />
+          <input type="date" v-model="m.startDate" title="Старт карусели" />
+        </div>
       </div>
 
       <div class="row" style="gap: 6px">
@@ -109,6 +118,7 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
         <button class="sm ghost" @click="addMove(sc, 'newLoan')">+ Кредит</button>
         <button class="sm ghost" @click="addMove(sc, 'adjust')">+ Доход/расход</button>
         <button class="sm ghost" @click="addMove(sc, 'transfer')">+ Перенос долга</button>
+        <button class="sm ghost" @click="addMove(sc, 'carousel')">+ Карусель</button>
       </div>
     </div>
 
@@ -136,6 +146,12 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
               <td class="muted small">Переплата (проценты)</td>
               <td v-for="c in comparison" :key="c.name" class="mono" :class="c.metrics && c.metrics.overpayment > 0 ? 'warn' : 'pos'">
                 {{ c.metrics ? money(c.metrics.overpayment) : '-' }}
+              </td>
+            </tr>
+            <tr>
+              <td class="muted small">Экономия карусели</td>
+              <td v-for="c in comparison" :key="c.name" class="mono pos">
+                {{ c.metrics && c.metrics.carouselSaved ? money(c.metrics.carouselSaved) : '-' }}
               </td>
             </tr>
             <tr>
