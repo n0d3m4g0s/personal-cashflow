@@ -151,7 +151,7 @@ function removeMove(sc, i) { sc.moves.splice(i, 1) }
             <tr>
               <td class="muted small">Экономия карусели</td>
               <td v-for="c in comparison" :key="c.name" class="mono pos">
-                {{ c.metrics && c.metrics.carouselSaved ? money(c.metrics.carouselSaved) : '-' }}
+                {{ c.metrics ? money(c.metrics.carouselSaved || 0) : '-' }}
               </td>
             </tr>
             <tr>
