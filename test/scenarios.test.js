@@ -442,3 +442,60 @@ test('carouselPlan: комиссия считается по формуле на
   const expected = 0.029 * over + 290
   assert.ok(Math.abs(plan.fee - expected) < 1, `комиссия за оборот = ${expected}`)
 })
+
+// Состояние с двумя картами Т-Банка для сценарных тестов карусели.
+const carouselState = () => {
+  const st = baseState()
+  st.cards = tbankPair()
+  return st
+}
+
+test('applyScenario: carousel НЕ добавляет income/expense и НЕ меняет currentDebt (кэш чист)', () => {
+  const st = carouselState()
+  const debtBefore = st.cards[0].currentDebt.amount
+  const scenario = { id: 'sc-car', name: 'Карусель', moves: [
+    { type: 'carousel', cardAId: 'A', cardBId: 'B', amount: { amount: 150000, currency: 'RUB' }, startDate: '2026-11-10' },
+  ] }
+  const out = applyScenario(st, scenario)
+  assert.equal(out.incomes.length, 0, 'карусель не добавляет доходов')
+  assert.equal(out.expenses.length, 0, 'карусель не добавляет расходов - кэш не трогается')
+  assert.equal(out.cards[0].currentDebt.amount, debtBefore, 'currentDebt не меняется')
+})
+
+test('evaluateScenario: carousel даёт carouselSaved > 0 и не роняет минимальный остаток', () => {
+  const st = carouselState()
+  const scenario = { id: 'sc-car2', name: 'Карусель', baseFrom: '2026-11-10', moves: [
+    { type: 'carousel', cardAId: 'A', cardBId: 'B', amount: { amount: 150000, currency: 'RUB' }, startDate: '2026-11-10' },
+  ] }
+  const res = evaluateScenario(st, scenario, { from: '2026-11-10' })
+  assert.ok(res.metrics.carouselSaved > 0, 'есть экономия карусели')
+  // сравним с пустым сценарием: минимальный остаток НЕ должен просесть от карусели
+  const empty = evaluateScenario(st, { id: 'e', name: 'пусто', baseFrom: '2026-11-10', moves: [] }, { from: '2026-11-10' })
+  assert.equal(res.metrics.minBalance, empty.metrics.minBalance, 'карусель не создаёт ложной ямы в кассе')
+})
+
+test('evaluateScenario: transfer роняет кассу, тот же долг через carousel - нет', () => {
+  const st = carouselState()
+  // Сумма хода 190к (не 150к): при 150к сумма хода случайно совпадает с currentDebt
+  // карты A, и оба пути (базовый платёж карты A по payStrategy full в carousel-ветке и
+  // искусственный возврат живыми в transfer-ветке) дают одинаковую просадку 100к-150к =
+  // -50000 - тест не различал бы механизмы. 190к укладывается в кредитный лимит карты B
+  // (195к свободно) - карусель остаётся feasible, а просадка transfer явно глубже.
+  const withTransfer = evaluateScenario(st, { id: 't', name: 'перенос', baseFrom: '2026-11-10', moves: [
+    { type: 'transfer', fromCardId: 'A', toCardId: 'B', amount: { amount: 190000, currency: 'RUB' }, date: '2026-11-10', repay: 'manual', repayDate: '2026-12-30' },
+  ] }, { from: '2026-11-10' })
+  const withCarousel = evaluateScenario(st, { id: 'c', name: 'карусель', baseFrom: '2026-11-10', moves: [
+    { type: 'carousel', cardAId: 'A', cardBId: 'B', amount: { amount: 190000, currency: 'RUB' }, startDate: '2026-11-10' },
+  ] }, { from: '2026-11-10' })
+  assert.ok(withCarousel.metrics.minBalance > withTransfer.metrics.minBalance, 'карусель бережёт кассу сильнее переноса')
+})
+
+test('evaluateScenario: нереализуемая карусель добавляет предупреждение', () => {
+  const st = carouselState()
+  st.cards[1].transferGraceEnabled = false
+  const res = evaluateScenario(st, { id: 'w', name: 'плохая', baseFrom: '2026-11-10', moves: [
+    { type: 'carousel', cardAId: 'A', cardBId: 'B', amount: { amount: 150000, currency: 'RUB' }, startDate: '2026-11-10' },
+  ] }, { from: '2026-11-10' })
+  assert.ok(res.metrics.transferWarnings.length > 0, 'предупреждение о нереализуемой карусели')
+  assert.equal(res.metrics.carouselSaved, 0, 'без реализуемости экономии нет')
+})

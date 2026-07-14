@@ -219,6 +219,11 @@ function applyMove(s, move) {
       // парным событием в evaluateScenario. Наличные не добавляем.
       break
     }
+    case 'carousel':
+      // Карусель кэш не трогает: долг переезжает переводом, живые деньги не задействованы.
+      // currentDebt НЕ меняем, income/expense НЕ добавляем. Весь эффект - в метриках
+      // (carouselPlan вызывается в evaluateScenario). Ложной ямы в кассе нет.
+      break
     default:
       break
   }
@@ -311,6 +316,25 @@ export function evaluateScenario(state, scenario, opts = {}) {
     }
   }
 
+  // Ходы карусели: считаем экономию/проценты/комиссию через carouselPlan. Кэш не трогаем.
+  const carousels = (scenario.moves || []).filter((m) => m.type === 'carousel')
+  let carouselSaved = 0
+  let carouselCost = 0
+  for (const move of carousels) {
+    const cardA = forked.cards.find((c) => c.id === move.cardAId)
+    const cardB = forked.cards.find((c) => c.id === move.cardBId)
+    const startDate = parseDate(move.startDate)
+    if (!cardA || !cardB || !startDate) continue // неполный ход или карта удалена
+    const end = buildForecast(forked, { from }).end
+    const plan = carouselPlan(cardA, cardB, move.amount, startDate, end, rates)
+    if (plan.feasible) {
+      carouselSaved += plan.saved
+      carouselCost += plan.fee + plan.interest
+    } else if (plan.warning) {
+      transferWarnings.push({ carousel: true, warning: plan.warning })
+    }
+  }
+
   // проценты по новым кредитам (сумму конвертируем в рубли - overpayment в рублях).
   // Неполные ходы (без валидной даты) пропускаем, как и в applyScenario/цикле займов.
   let loanInterest = 0
@@ -335,7 +359,8 @@ export function evaluateScenario(state, scenario, opts = {}) {
     metrics: {
       minBalance,
       minBalanceDate: forecast.minBalanceDate,
-      overpayment: Math.round(cardInterest + loanInterest + transferTotal),
+      overpayment: Math.round(cardInterest + loanInterest + transferTotal + carouselCost),
+      carouselSaved: Math.round(carouselSaved),
       transferWarnings,
       graceOk,
       breakEvenDate,
