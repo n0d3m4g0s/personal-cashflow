@@ -71,30 +71,26 @@ export function transferCost(toCard, amount, transferDate, repayDate, rates) {
 }
 
 // План карусели: крутим долг amount между картами cardA и cardB, перекладывая каждые
-// (min грейс перевода − 5) дней от startDate до end. cardA - карта-старт (источник долга).
+// (min грейс перевода - 5) дней от startDate до end. cardA - карта-старт (источник долга).
 // Кэш не трогается: долг переезжает переводом, живые деньги не задействованы.
 // startDate/end - объекты Date. Возвращает график переводов, проценты, комиссию, экономию,
 // реализуемость и id карты-держателя долга в конце горизонта.
 export function carouselPlan(cardA, cardB, amount, startDate, end, rates) {
   const amtRub = moneyToRub(amount, rates)
-  const limitA = moneyToRub(cardA.transferLimit, rates)
-  const limitB = moneyToRub(cardB.transferLimit, rates)
   const graceA = Number(cardA.transferGraceDays) || 0
   const graceB = Number(cardB.transferGraceDays) || 0
   const stepDays = Math.max(1, Math.min(graceA, graceB) - 5)
 
-  // Проверка реализуемости.
+  // Проверка реализуемости. Ограничение - ОБЩИЙ кредитный лимит приёмника, НЕ беспроцентный
+  // лимит перевода: сумма сверх transferLimit карусель не ломает, а даёт комиссию (см. ниже).
   let feasible = true
   let warning = null
   if (cardA.transferGraceEnabled === false || cardB.transferGraceEnabled === false) {
     feasible = false
     const bad = cardA.transferGraceEnabled === false ? cardA.name : cardB.name
     warning = `Карта "${bad}" не даёт грейс на перевод - карусель под 0% невозможна`
-  } else if (amtRub > Math.min(limitA, limitB)) {
-    feasible = false
-    warning = `Сумма ${Math.round(amtRub)} превышает лимит перевода одной из карт (${Math.round(Math.min(limitA, limitB))})`
   } else {
-    // хотя бы одна карта должна иметь свободный лимит под приём на первом обороте
+    // хотя бы одна карта должна иметь свободный кредитный лимит под приём на первом обороте
     const freeA = moneyToRub(cardA.creditLimit, rates) - moneyToRub(cardA.currentDebt, rates)
     const freeB = moneyToRub(cardB.creditLimit, rates) - moneyToRub(cardB.currentDebt, rates)
     if (Math.max(freeA, freeB) < amtRub) {

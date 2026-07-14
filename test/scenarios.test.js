@@ -395,7 +395,7 @@ test('carouselPlan: чередование направлений и шаг ~50 
   assert.equal(plan.transfers[1].toId, 'A')
   const d0 = parseDate(plan.transfers[0].date), d1 = parseDate(plan.transfers[1].date)
   const step = Math.round((d1 - d0) / 86400000)
-  assert.equal(step, 50, 'шаг = min(грейс) − 5 = 55 − 5')
+  assert.equal(step, 50, 'шаг = min(грейс) - 5 = 55 - 5')
 })
 
 test('carouselPlan: карта без transferGraceEnabled → feasible false с предупреждением', () => {
@@ -406,24 +406,39 @@ test('carouselPlan: карта без transferGraceEnabled → feasible false с
   assert.ok(plan.warning && plan.warning.length > 0, 'есть текст предупреждения')
 })
 
-test('carouselPlan: сумма сверх лимита перевода → feasible false', () => {
+test('carouselPlan: сумма сверх лимита перевода, но в кредитном лимите → feasible true с комиссией', () => {
   const [a, b] = tbankPair()
-  // лимит перевода 150к у обеих, просим 200к
+  // лимит перевода 150к у обеих, кредитный лимит поднимаем, чтобы 200к влезли по кредиту
+  a.creditLimit = { amount: 300000, currency: 'RUB' }
+  b.creditLimit = { amount: 300000, currency: 'RUB' }
+  a.transferFeePercent = 2.9; a.transferFeeFixed = { amount: 290, currency: 'RUB' }
+  b.transferFeePercent = 2.9; b.transferFeeFixed = { amount: 290, currency: 'RUB' }
   const plan = carouselPlan(a, b, { amount: 200000, currency: 'RUB' }, parseDate('2026-11-10'), parseDate('2027-01-14'), rates0)
+  assert.equal(plan.feasible, true, 'сумма сверх лимита перевода не ломает карусель, если хватает кредитного лимита')
+  assert.ok(plan.fee > 0, 'на превышение над лимитом перевода есть комиссия')
+})
+
+test('carouselPlan: сумма сверх кредитного лимита обеих карт → feasible false', () => {
+  const [a, b] = tbankPair()
+  // просим 400к при кредитных лимитах 160к/195к - ни на одной не влезет
+  const plan = carouselPlan(a, b, { amount: 400000, currency: 'RUB' }, parseDate('2026-11-10'), parseDate('2027-01-14'), rates0)
   assert.equal(plan.feasible, false)
   assert.ok(plan.warning && plan.warning.length > 0)
 })
 
-test('carouselPlan: комиссия за перевод считается на сумму сверх лимита', () => {
+test('carouselPlan: комиссия считается по формуле на каждом обороте (over × %/100 + fixed)', () => {
   const [a, b] = tbankPair()
-  // поднимаем лимит перевода до 250к с комиссией 2.9%+290 на сверхлимитную часть 100к
-  a.transferLimit = { amount: 150000, currency: 'RUB' }
-  b.transferLimit = { amount: 150000, currency: 'RUB' }
+  // лимит перевода 150к, комиссия 2.9% + 290 на превышение. Кредитный лимит с запасом.
+  a.creditLimit = { amount: 300000, currency: 'RUB' }
+  b.creditLimit = { amount: 300000, currency: 'RUB' }
   a.transferFeePercent = 2.9; a.transferFeeFixed = { amount: 290, currency: 'RUB' }
   b.transferFeePercent = 2.9; b.transferFeeFixed = { amount: 290, currency: 'RUB' }
-  a.creditLimit = { amount: 300000, currency: 'RUB' }; a.currentDebt = { amount: 200000, currency: 'RUB' }
-  b.creditLimit = { amount: 300000, currency: 'RUB' }
-  // сумма 200к > лимит перевода 150к → feasible false по правилу (б). Проверяем именно false.
-  const plan = carouselPlan(a, b, { amount: 200000, currency: 'RUB' }, parseDate('2026-11-10'), parseDate('2027-01-14'), rates0)
-  assert.equal(plan.feasible, false, 'сумма > min(transferLimit) → нереализуемо')
+  // короткий горизонт → ровно 1 оборот, чтобы проверить комиссию за один перевод
+  const plan = carouselPlan(a, b, { amount: 200000, currency: 'RUB' }, parseDate('2026-11-10'), parseDate('2026-11-20'), rates0)
+  assert.equal(plan.feasible, true)
+  assert.equal(plan.transfers.length, 1, 'на коротком горизонте один оборот')
+  // over = 200000 - 150000 = 50000; комиссия = 0.029 × 50000 + 290 = 1740
+  const over = 50000
+  const expected = 0.029 * over + 290
+  assert.ok(Math.abs(plan.fee - expected) < 1, `комиссия за оборот = ${expected}`)
 })
