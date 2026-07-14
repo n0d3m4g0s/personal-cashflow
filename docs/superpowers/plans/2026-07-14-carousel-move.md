@@ -19,7 +19,7 @@
 - `stepDays = min(cardA.transferGraceDays, cardB.transferGraceDays) − 5`, минимум 1.
 - `saved = amtRub × apr_holder × дни(startDate→end) / 365`, где `apr_holder = max(cardA.apr, cardB.apr)`.
 - Комиссия оборота: `transferFeePercent/100 × over + transferFeeFixed`, где `over = max(0, amtRub − transferLimit)`.
-- `feasible` true тогда и только тогда, когда: (а) обе карты `transferGraceEnabled !== false`, (б) `amtRub ≤ min(transferLimit_A, transferLimit_B)`, (в) хотя бы одна карта имеет свободный лимит `creditLimit − currentDebt ≥ amtRub` для приёма на первом обороте. Иначе `feasible: false` + текст в `warning`.
+- `feasible` true тогда и только тогда, когда: (а) обе карты `transferGraceEnabled !== false`, (б) хотя бы одна карта имеет свободный кредитный лимит `creditLimit − currentDebt ≥ amtRub` для приёма на первом обороте. Сумма СВЕРХ `transferLimit` карусель НЕ ломает - даёт комиссию, не фейл. Иначе `feasible: false` + текст в `warning`. (Task 1 реализован и уже учитывает это правило.)
 - carousel в applyScenario НЕ добавляет income/expense и НЕ меняет currentDebt (весь эффект — в метриках).
 - НЕ ломать существующие тесты (`test/scenarios.test.js`, `test/finance.test.js`, `test/advice.test.js`). Запуск: `npm test`.
 - Файлы: `src/scenarios.js`, `src/components/ScenariosView.vue`, `test/scenarios.test.js`. Больше ничего не трогаем.
@@ -35,6 +35,14 @@
 ---
 
 ## Task 1: Чистая функция `carouselPlan`
+
+> **Историческая пометка (после реализации):** ниже приведён ПЕРВОНАЧАЛЬНЫЙ код Task 1.
+> В финальной реализации (коммит 4f2ee10, по решению пользователя) правило `feasible`
+> ослаблено: ограничение реализуемости - ОБЩИЙ кредитный лимит приёмника, а НЕ беспроцентный
+> `transferLimit`. Ветка `else if (amtRub > Math.min(limitA, limitB))` УДАЛЕНА; сумма сверх
+> `transferLimit` даёт комиссию, а не фейл. Актуальный код - в `src/scenarios.js`, актуальное
+> правило - в обновлённой спеке `docs/superpowers/specs/2026-07-14-carousel-move-design.md`.
+> Тесты про сумму 200к тоже переписаны (feasible true при достаточном creditLimit + комиссия).
 
 **Files:**
 - Modify: `src/scenarios.js` (добавить экспорт `carouselPlan` после `transferCost`, ~строка 71)

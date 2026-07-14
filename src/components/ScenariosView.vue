@@ -36,7 +36,7 @@ function addMove(sc, type) {
     newLoan: { type: 'newLoan', title: 'Кредит', amount: { amount: 0, currency: 'RUB' }, apr: 0.25, termMonths: 12, startDate: '' },
     adjust: { type: 'adjust', title: 'Корректировка', amount: { amount: 0, currency: 'RUB' }, sign: -1, date: '' },
     transfer: { type: 'transfer', fromCardId: state.cards[0]?.id || '', toCardId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, date: '', repay: 'auto', repayDate: '' },
-    carousel: { type: 'carousel', cardAId: state.cards[0]?.id || '', cardBId: state.cards[0]?.id || '', amount: { amount: 0, currency: 'RUB' }, startDate: '' },
+    carousel: { type: 'carousel', cardAId: state.cards[0]?.id || '', cardBId: (state.cards[1] || state.cards[0])?.id || '', amount: { amount: 0, currency: 'RUB' }, startDate: '' },
   }[type]
   sc.moves.push(JSON.parse(JSON.stringify(blank)))
 }
