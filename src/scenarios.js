@@ -70,6 +70,84 @@ export function transferCost(toCard, amount, transferDate, repayDate, rates) {
   return { fee, interest, total: fee + interest, availableLimit, exceedsLimit }
 }
 
+// План карусели: крутим долг amount между картами cardA и cardB, перекладывая каждые
+// (min грейс перевода − 5) дней от startDate до end. cardA - карта-старт (источник долга).
+// Кэш не трогается: долг переезжает переводом, живые деньги не задействованы.
+// startDate/end - объекты Date. Возвращает график переводов, проценты, комиссию, экономию,
+// реализуемость и id карты-держателя долга в конце горизонта.
+export function carouselPlan(cardA, cardB, amount, startDate, end, rates) {
+  const amtRub = moneyToRub(amount, rates)
+  const limitA = moneyToRub(cardA.transferLimit, rates)
+  const limitB = moneyToRub(cardB.transferLimit, rates)
+  const graceA = Number(cardA.transferGraceDays) || 0
+  const graceB = Number(cardB.transferGraceDays) || 0
+  const stepDays = Math.max(1, Math.min(graceA, graceB) - 5)
+
+  // Проверка реализуемости.
+  let feasible = true
+  let warning = null
+  if (cardA.transferGraceEnabled === false || cardB.transferGraceEnabled === false) {
+    feasible = false
+    const bad = cardA.transferGraceEnabled === false ? cardA.name : cardB.name
+    warning = `Карта "${bad}" не даёт грейс на перевод - карусель под 0% невозможна`
+  } else if (amtRub > Math.min(limitA, limitB)) {
+    feasible = false
+    warning = `Сумма ${Math.round(amtRub)} превышает лимит перевода одной из карт (${Math.round(Math.min(limitA, limitB))})`
+  } else {
+    // хотя бы одна карта должна иметь свободный лимит под приём на первом обороте
+    const freeA = moneyToRub(cardA.creditLimit, rates) - moneyToRub(cardA.currentDebt, rates)
+    const freeB = moneyToRub(cardB.creditLimit, rates) - moneyToRub(cardB.currentDebt, rates)
+    if (Math.max(freeA, freeB) < amtRub) {
+      feasible = false
+      warning = `Ни на одной карте нет свободного лимита ${Math.round(amtRub)} для первого переноса`
+    }
+  }
+
+  // График переводов: старт A->B, далее чередуем каждые stepDays до end.
+  const transfers = []
+  let d = startDate
+  let dir = 0 // 0: A->B, 1: B->A
+  while (d <= end) {
+    const fromId = dir === 0 ? cardA.id : cardB.id
+    const toId = dir === 0 ? cardB.id : cardA.id
+    const graceEnd = addDays(d, dir === 0 ? graceA : graceB)
+    transfers.push({ date: fmtISO(d), fromId, toId, graceEnd: fmtISO(graceEnd) })
+    d = addDays(d, stepDays)
+    dir = dir === 0 ? 1 : 0
+  }
+
+  // Проценты: 0 пока каждый шаг не превышает грейса перевода. Если stepDays > грейса
+  // (вырожденный ввод) - проценты за просрочку по apr держателя на дни сверх грейса за оборот.
+  const aprHolder = Math.max(Number(cardA.apr) || 0, Number(cardB.apr) || 0)
+  let interest = 0
+  for (const t of transfers) {
+    const graceDays = t.fromId === cardA.id ? graceA : graceB
+    if (stepDays > graceDays) {
+      const over = stepDays - graceDays
+      interest += aprHolder * amtRub * over / 365
+    }
+  }
+
+  // Комиссия: часть суммы сверх лимита перевода карты-приёмника на каждом обороте.
+  let fee = 0
+  for (const t of transfers) {
+    const to = t.toId === cardA.id ? cardA : cardB
+    const limit = moneyToRub(to.transferLimit, rates)
+    const over = Math.max(0, amtRub - limit)
+    if (over > 0) {
+      fee += (Number(to.transferFeePercent) || 0) / 100 * over + moneyToRub(to.transferFeeFixed, rates)
+    }
+  }
+
+  // Экономия: долг иначе висел бы под старшей ставкой весь горизонт.
+  const daysHeld = Math.max(0, Math.round((end - startDate) / 86400000))
+  const saved = feasible ? amtRub * aprHolder * daysHeld / 365 : 0
+
+  const endHolderId = transfers.length ? transfers[transfers.length - 1].toId : null
+
+  return { transfers, interest, fee, saved, feasible, warning, endHolderId }
+}
+
 // Применяет сценарий к состоянию, возвращая НОВОЕ состояние (исходник не мутируется).
 export function applyScenario(state, scenario) {
   const s = JSON.parse(JSON.stringify(state))
