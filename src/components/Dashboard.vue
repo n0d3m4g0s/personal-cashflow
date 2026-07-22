@@ -8,6 +8,8 @@ const rates = computed(() => state.settings.rates)
 const monthly = computed(() => buildMonthly(state, rates.value))
 const forecast = computed(() => buildForecast(state))
 const goals = computed(() => computeGoals(state))
+const perAccount = computed(() => forecast.value.perAccount || [])
+function moneyIn(v, cur) { return formatMoney(v, cur) }
 
 const upcoming = computed(() => forecast.value.events.slice(0, 12))
 const alerts = computed(() => forecast.value.alerts.slice(0, 6))
@@ -49,6 +51,17 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
       </div>
     </section>
 
+    <!-- Карточки счетов -->
+    <section v-if="perAccount.length" class="grid summary">
+      <div v-for="pa in perAccount" :key="pa.account.id" class="card stat">
+        <div class="muted small">{{ pa.account.name }} ({{ pa.currency }})</div>
+        <div class="big mono" :class="pa.minBalance < pa.buffer ? 'warn' : 'pos'">{{ moneyIn(pa.endBalance, pa.currency) }}</div>
+        <div class="small muted">
+          минимум {{ moneyIn(pa.minBalance, pa.currency) }} · {{ fmtHuman(pa.minBalanceDate) }}
+        </div>
+      </div>
+    </section>
+
     <!-- Алерты -->
     <section v-if="alerts.length" class="card alert-box">
       <h2>⚠️ Кассовые разрывы</h2>
@@ -56,12 +69,13 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
         В эти даты остаток опустится ниже безопасного буфера — надо накопить заранее или занять на время.
       </p>
       <table>
-        <thead><tr><th>Дата</th><th>Остаток</th><th>Не хватает до буфера</th><th></th></tr></thead>
+        <thead><tr><th>Дата</th><th>Счёт</th><th>Остаток</th><th>Не хватает</th><th></th></tr></thead>
         <tbody>
           <tr v-for="(a, i) in alerts" :key="i">
             <td class="nowrap">{{ fmtHuman(a.date) }}</td>
-            <td class="mono" :class="a.belowZero ? 'neg' : 'warn'">{{ money(a.balance) }}</td>
-            <td class="mono warn">{{ money(a.shortfall) }}</td>
+            <td class="small">{{ a.accountName }} ({{ a.currency }})</td>
+            <td class="mono" :class="a.belowZero ? 'neg' : 'warn'">{{ moneyIn(a.balance, a.currency) }}</td>
+            <td class="mono warn">{{ moneyIn(a.shortfall, a.currency) }}</td>
             <td>
               <span v-if="a.belowZero" class="pill" style="color: var(--red); border-color: #5b2b32">минус на счету</span>
               <span v-else class="pill warn">ниже буфера</span>
@@ -71,8 +85,7 @@ function sign(a) { return (a >= 0 ? '+' : '−') + money(Math.abs(a)) }
       </table>
     </section>
     <section v-else class="card ok-box">
-      ✅ На горизонте прогноза кассовых разрывов нет — остаток не опускается ниже буфера
-      ({{ money(forecast.buffer) }}).
+      ✅ На горизонте прогноза кассовых разрывов нет - ни один счёт не опускается ниже своего буфера.
     </section>
 
     <div class="grid two">
