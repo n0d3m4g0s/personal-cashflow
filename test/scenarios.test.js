@@ -66,6 +66,7 @@ const wifeCard = () => ({
 const familyState = () => {
   const st = baseState()
   st.settings.startingCash = { amount: 238500, currency: 'RUB' }
+  st.accounts = [{ id: 'a', currency: 'RUB', startingBalance: 238500, safetyBuffer: 50000 }]
   st.settings.horizonMonths = 6
   st.incomes = [{ name: 'ЗП', amount: 300000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-10' } }]
   st.expenses = [{ name: 'Жизнь', amount: 92000, currency: 'RUB', schedule: { frequency: 'monthly', startDate: '2026-07-01' } }]

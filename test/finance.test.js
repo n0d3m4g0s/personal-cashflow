@@ -463,3 +463,44 @@ test('buildForecast: perAccount раздельные остатки в свои�
   assert.equal(usd.currency, 'USD')
   assert.equal(rub.endBalance, 90000) // 100000 - 10000 в рублях
 })
+
+test('buildForecast: расход в USD списан с RUB-счёта конвертируется в рубли', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 1 },
+    accounts: [{ id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 }],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'iCloud USD', amount: 10, currency: 'USD', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const f = buildForecast(state, { from: '2026-07-22' })
+  const rub = f.perAccount.find((a) => a.account.id === 'acc_rub')
+  // 10 USD при usdPerRub=0.01 -> 1000 руб; 100000 - 1000 = 99000
+  assert.equal(rub.endBalance, 99000)
+})
+
+test('buildForecast: посчётный алерт на минус долларового при плюсовом общем', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 1 },
+    accounts: [
+      { id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 500000, safetyBuffer: 0 },
+      { id: 'acc_usd', name: 'Долларовый', currency: 'USD', startingBalance: 100, safetyBuffer: 0 },
+    ],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'Аренда USD', amount: 300, currency: 'USD', accountId: 'acc_usd',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const f = buildForecast(state, { from: '2026-07-22' })
+  // общий остаток плюсовой: 500000 + 100/0.01(=10000) - 300/0.01(=30000) = 480000
+  assert.ok(f.endBalance > 0)
+  // но долларовый ушёл в минус -> есть алерт с belowZero и accountId
+  const usdAlert = f.alerts.find((a) => a.accountId === 'acc_usd')
+  assert.ok(usdAlert)
+  assert.equal(usdAlert.belowZero, true)
+  assert.equal(usdAlert.currency, 'USD')
+})
