@@ -1,7 +1,7 @@
 // Финансовое ядро: работа с датами, разворачивание регулярности (schedule),
 // движок прогноза денежного потока и расчёт целей. Чистые функции — тестируемо.
 
-import { moneyToRub } from './money.js'
+import { moneyToRub, convert } from './money.js'
 
 // ---------- Даты (локальные, без сдвигов TZ) ----------
 
@@ -352,7 +352,7 @@ export function buildForecast(state, opts = {}) {
     if (inc.disabled) continue
     const rub = moneyToRub(inc, rates)
     for (const d of expandSchedule(inc.schedule, start, end)) {
-      add(d, +rub, 'income', inc.name, { owner: inc.owner, native: { amount: inc.amount, currency: inc.currency } })
+      add(d, +rub, 'income', inc.name, { owner: inc.owner, accountId: inc.accountId ?? null, native: { amount: inc.amount, currency: inc.currency } })
     }
   }
 
@@ -361,7 +361,7 @@ export function buildForecast(state, opts = {}) {
     if (ex.disabled) continue
     const rub = moneyToRub(ex, rates)
     for (const d of expandSchedule(ex.schedule, start, end)) {
-      add(d, -rub, 'expense', ex.name, { owner: ex.owner, category: ex.category, native: { amount: ex.amount, currency: ex.currency } })
+      add(d, -rub, 'expense', ex.name, { owner: ex.owner, category: ex.category, accountId: ex.accountId ?? null, native: { amount: ex.amount, currency: ex.currency } })
     }
   }
 
@@ -376,7 +376,7 @@ export function buildForecast(state, opts = {}) {
       const d = clampDayToMonth(start.getFullYear(), start.getMonth() + m, Number(loan.paymentDay) || 1)
       if (d < start || d > end) continue
       if (n >= maxN) break
-      add(d, -pay, 'loan', loan.name, { owner: loan.owner })
+      add(d, -pay, 'loan', loan.name, { owner: loan.owner, accountId: loan.accountId ?? null, native: { amount: loan.amount, currency: loan.currency } })
       n++
     }
   }
@@ -391,13 +391,13 @@ export function buildForecast(state, opts = {}) {
     if (full) {
       add(due, -debt, 'card', `${card.name} (полное)`, {
         owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
-        strategy: 'full', minPayment: cardMinPayment(card, rates), fullPayment: debt,
+        strategy: 'full', minPayment: cardMinPayment(card, rates), fullPayment: debt, accountId: null,
       })
     } else {
       for (const p of cardPaymentSchedule(card, rates, start, end)) {
         add(p.date, -p.amount, 'card', `${card.name} (минимум)`, {
           owner: card.owner, bank: card.bank, statementDate: statement, graceDate: graceEnd,
-          strategy: 'minimum', remainingAfter: p.remainingAfter, interest: p.interest,
+          strategy: 'minimum', remainingAfter: p.remainingAfter, interest: p.interest, accountId: null,
         })
       }
     }
@@ -407,7 +407,10 @@ export function buildForecast(state, opts = {}) {
   events.sort((a, b) => a.date - b.date || (a.amount - b.amount))
 
   // Нарастающий остаток
-  const startingCash = moneyToRub(state.settings.startingCash, rates)
+  // Общий стартовый остаток - сумма стартовых остатков счетов, сведённых в рубли.
+  const accounts = (state.accounts || []).filter((a) => !a.disabled)
+  const startingCash = accounts.reduce(
+    (s, a) => s + convert(Number(a.startingBalance) || 0, a.currency || 'RUB', 'RUB', rates), 0)
   let balance = startingCash
   const days = []
   const alerts = []
@@ -427,16 +430,48 @@ export function buildForecast(state, opts = {}) {
     const d = parseDate(key)
     days.push({ date: d, events: evs, dayTotal, balance })
     if (balance < minBalance) { minBalance = balance; minBalanceDate = d }
-    if (balance < buffer) {
-      alerts.push({
-        date: d,
-        balance,
-        shortfall: buffer - balance,
-        belowZero: balance < 0,
-        buffer,
-      })
-    }
   }
+
+  // Раздельные дорожки по счетам (каждая в валюте своего счёта).
+  const perAccount = accounts.map((account) => {
+    const cur = account.currency || 'RUB'
+    let bal = Number(account.startingBalance) || 0
+    const accBuffer = Number(account.safetyBuffer) || 0
+    const accDays = []
+    const accAlerts = []
+    let accMin = bal
+    let accMinDate = start
+    const accByDate = new Map()
+    for (const e of events) {
+      if (e.accountId !== account.id) continue
+      const key = fmtISO(e.date)
+      if (!accByDate.has(key)) accByDate.set(key, [])
+      accByDate.get(key).push(e)
+    }
+    for (const [key, evs] of accByDate) {
+      // конвертируем нативную сумму каждого события в валюту счёта, сохраняя знак
+      const dayTotal = evs.reduce((s, e) => {
+        const nativeAmt = e.native ? (Number(e.native.amount) || 0) : Math.abs(e.amount)
+        const nativeCur = e.native ? (e.native.currency || 'RUB') : 'RUB'
+        const inAcc = convert(nativeAmt, nativeCur, cur, rates)
+        return s + (e.amount >= 0 ? inAcc : -inAcc)
+      }, 0)
+      bal += dayTotal
+      const d = parseDate(key)
+      accDays.push({ date: d, events: evs, dayTotal, balance: bal })
+      if (bal < accMin) { accMin = bal; accMinDate = d }
+      if (bal < accBuffer) {
+        accAlerts.push({ date: d, balance: bal, shortfall: accBuffer - bal, belowZero: bal < 0,
+          buffer: accBuffer, accountId: account.id, accountName: account.name, currency: cur })
+      }
+    }
+    return { account, currency: cur, startingBalance: Number(account.startingBalance) || 0,
+      days: accDays, alerts: accAlerts, minBalance: accMin, minBalanceDate: accMinDate,
+      endBalance: bal, buffer: accBuffer }
+  })
+
+  for (const pa of perAccount) alerts.push(...pa.alerts)
+  alerts.sort((a, b) => a.date - b.date)
 
   // Месячные сводки
   const monthly = buildMonthly(state, rates, start, horizonMonths)
@@ -446,6 +481,7 @@ export function buildForecast(state, opts = {}) {
     events, days, alerts,
     minBalance, minBalanceDate,
     endBalance: balance,
+    perAccount,
   }
 }
 

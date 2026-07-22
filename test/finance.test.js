@@ -439,3 +439,27 @@ test('cardsSummary: пустое состояние → нули', () => {
   assert.equal(s.monthlyMin, 0)
   assert.deepEqual(s.perCard, [])
 })
+
+test('buildForecast: perAccount раздельные остатки в своих валютах', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 2 },
+    accounts: [
+      { id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 },
+      { id: 'acc_usd', name: 'Долларовый', currency: 'USD', startingBalance: 500, safetyBuffer: 0 },
+    ],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'Аренда USD', amount: 300, currency: 'USD', accountId: 'acc_usd',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+      { id: 'e2', name: 'Продукты RUB', amount: 10000, currency: 'RUB', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const f = buildForecast(state, { from: '2026-07-22' })
+  const usd = f.perAccount.find((a) => a.account.id === 'acc_usd')
+  const rub = f.perAccount.find((a) => a.account.id === 'acc_rub')
+  assert.equal(usd.endBalance, 200)   // 500 - 300 в долларах
+  assert.equal(usd.currency, 'USD')
+  assert.equal(rub.endBalance, 90000) // 100000 - 10000 в рублях
+})
