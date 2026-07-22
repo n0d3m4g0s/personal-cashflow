@@ -507,6 +507,65 @@ export function buildForecast(state, opts = {}) {
   }
 }
 
+// Мультивалютный таймлайн "по валютам счетов" (для режима "Все счета" в прогнозе).
+// В отличие от perAccount (по каждому счёту, одна валюта), тут одна дорожка на КАЖДУЮ
+// уникальную валюту счетов: остатки счетов одной валюты суммируются. Каждый day несёт
+// { date, events, balances: {валюта: остаток}, danger }. События без accountId (карты)
+// и события счетов, которых нет/выключены, относятся к рублёвой дорожке (как в общем балансе).
+export function forecastByCurrency(state, opts = {}) {
+  const rates = state.settings.rates
+  const f = buildForecast(state, opts)
+  const accounts = (state.accounts || []).filter((a) => !a.disabled)
+
+  // валюты дорожек - уникальные валюты активных счетов (в порядке появления)
+  const currencies = []
+  for (const a of accounts) {
+    const c = a.currency || 'RUB'
+    if (!currencies.includes(c)) currencies.push(c)
+  }
+  if (!currencies.length) currencies.push('RUB')
+
+  // старт и буфер по валютам - сумма по счетам этой валюты
+  const startByCur = {}
+  const buffers = {}
+  for (const c of currencies) { startByCur[c] = 0; buffers[c] = 0 }
+  for (const a of accounts) {
+    const c = a.currency || 'RUB'
+    startByCur[c] += Number(a.startingBalance) || 0
+    buffers[c] += Number(a.safetyBuffer) || 0
+  }
+
+  // валюта дорожки для события: валюта его счёта, иначе рубли
+  const accCurrency = (accountId) => {
+    if (!accountId) return 'RUB'
+    const a = (state.accounts || []).find((x) => x.id === accountId)
+    return a ? (a.currency || 'RUB') : 'RUB'
+  }
+
+  const running = { ...startByCur }
+  const days = []
+  for (const day of f.days) {
+    let danger = false
+    for (const e of day.events) {
+      const cur = accCurrency(e.accountId)
+      if (!(cur in running)) { running[cur] = startByCur[cur] || 0; if (!(cur in buffers)) buffers[cur] = 0 }
+      const nativeAmt = e.native ? (Number(e.native.amount) || 0) : Math.abs(e.amount)
+      const nativeCur = e.native ? (e.native.currency || 'RUB') : 'RUB'
+      const inCur = convert(nativeAmt, nativeCur, cur, rates)
+      running[cur] += e.amount >= 0 ? inCur : -inCur
+    }
+    const balances = {}
+    for (const c of Object.keys(running)) {
+      balances[c] = running[c]
+      if (running[c] < (buffers[c] || 0)) danger = true
+    }
+    days.push({ date: day.date, events: day.events, balances, danger })
+  }
+
+  const allCurrencies = Object.keys(running).length ? Object.keys(running) : currencies
+  return { days, startByCur, buffers, currencies: allCurrencies, endByCur: { ...running } }
+}
+
 // Месячные эквиваленты доход/расход (устойчивая картина «в среднем за месяц»).
 export function buildMonthly(state, rates, start = today(), horizonMonths = 6) {
   let incomeM = 0

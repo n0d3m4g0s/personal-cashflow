@@ -4,8 +4,9 @@ import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
   cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
-  cardPaymentSchedule, cardsSummary, accountsStartingCash, accountsBuffer,
+  cardPaymentSchedule, cardsSummary, accountsStartingCash, accountsBuffer, forecastByCurrency,
 } from '../src/finance.js'
+import { convert } from '../src/money.js'
 import { migrateCard } from '../src/store.js'
 
 test('expandSchedule: monthly уважает диапазон', () => {
@@ -596,4 +597,92 @@ test('makeSeed: все записи привязаны к существующе
   for (const k of ['incomes', 'expenses', 'loans']) {
     for (const rec of s[k]) assert.ok(ids.has(rec.accountId), `${k} ${rec.id} без счёта`)
   }
+})
+
+test('forecastByCurrency: раздельные остатки по валютам счетов', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 1 },
+    accounts: [
+      { id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 },
+      { id: 'acc_usd', name: 'Долларовый', currency: 'USD', startingBalance: 500, safetyBuffer: 0 },
+    ],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'Аренда USD', amount: 300, currency: 'USD', accountId: 'acc_usd',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+      { id: 'e2', name: 'Продукты RUB', amount: 10000, currency: 'RUB', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const r = forecastByCurrency(state, { from: '2026-07-22' })
+  assert.deepEqual(r.currencies.sort(), ['RUB', 'USD'])
+  assert.equal(r.startByCur.RUB, 100000)
+  assert.equal(r.startByCur.USD, 500)
+  const last = r.days[r.days.length - 1].balances
+  assert.equal(last.RUB, 90000)  // 100000 - 10000
+  assert.equal(last.USD, 200)    // 500 - 300
+})
+
+test('forecastByCurrency: AMD-расход с рублёвого счёта конвертируется в рублёвую дорожку', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 1 },
+    accounts: [{ id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 }],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'Связь AMD', amount: 4000, currency: 'AMD', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const r = forecastByCurrency(state, { from: '2026-07-22' })
+  // AMD-счёта нет, дорожка только RUB; 4000 AMD при amdPerRub=4 -> 1000 руб; 100000 - 1000 = 99000
+  assert.deepEqual(r.currencies, ['RUB'])
+  assert.equal(r.days[r.days.length - 1].balances.RUB, 99000)
+})
+
+test('forecastByCurrency: сведённый в рубли итог совпадает с общим endBalance (нет двойного учёта)', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 2 },
+    accounts: [
+      { id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 500000, safetyBuffer: 0 },
+      { id: 'acc_usd', name: 'Долларовый', currency: 'USD', startingBalance: 100, safetyBuffer: 0 },
+    ],
+    incomes: [
+      { id: 'i1', name: 'ЗП', amount: 50000, currency: 'RUB', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-24' } },
+    ],
+    expenses: [
+      { id: 'e1', name: 'Аренда USD', amount: 300, currency: 'USD', accountId: 'acc_usd',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+      { id: 'e2', name: 'iCloud USD с рубля', amount: 10, currency: 'USD', accountId: 'acc_rub',
+        schedule: { frequency: 'once', startDate: '2026-07-26' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const rates = state.settings.rates
+  const f = buildForecast(state, { from: '2026-07-22' })
+  const r = forecastByCurrency(state, { from: '2026-07-22' })
+  const reconciledRub = Object.keys(r.endByCur).reduce((s, c) => s + convert(r.endByCur[c], c, 'RUB', rates), 0)
+  assert.ok(Math.abs(reconciledRub - f.endBalance) < 1e-6, `сведено ${reconciledRub} vs endBalance ${f.endBalance}`)
+})
+
+test('forecastByCurrency: danger при остатке валюты ниже её буфера', () => {
+  const state = {
+    settings: { rates: { amdPerRub: 4, usdPerRub: 0.01 }, horizonMonths: 1 },
+    accounts: [
+      { id: 'acc_rub', name: 'Основной', currency: 'RUB', startingBalance: 500000, safetyBuffer: 0 },
+      { id: 'acc_usd', name: 'Долларовый', currency: 'USD', startingBalance: 100, safetyBuffer: 0 },
+    ],
+    incomes: [],
+    expenses: [
+      { id: 'e1', name: 'Аренда USD', amount: 300, currency: 'USD', accountId: 'acc_usd',
+        schedule: { frequency: 'once', startDate: '2026-07-25' } },
+    ],
+    loans: [], cards: [], goals: [],
+  }
+  const r = forecastByCurrency(state, { from: '2026-07-22' })
+  const dangerDay = r.days.find((d) => d.danger)
+  assert.ok(dangerDay, 'должен быть день с danger (USD ниже буфера 0)')
+  assert.ok(dangerDay.balances.USD < 0)
 })

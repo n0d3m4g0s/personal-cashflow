@@ -1,74 +1,16 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { state } from '../store.js'
-import { buildForecast, fmtHuman, fmtMonthYear } from '../finance.js'
+import { buildForecast, forecastByCurrency, fmtHuman, fmtMonthYear } from '../finance.js'
 import { formatMoney, formatAllFromRub, convert } from '../money.js'
 
 const rates = computed(() => state.settings.rates)
 const forecast = computed(() => buildForecast(state))
 const selected = ref('all') // 'all' | account.id
 
-// Валюты счетов (уникальные, в порядке появления) - по ним строим раздельные остатки
-// в режиме "Все счета".
-const accountCurrencies = computed(() => {
-  const out = []
-  for (const a of state.accounts || []) {
-    if (a.disabled) continue
-    if (!out.includes(a.currency)) out.push(a.currency)
-  }
-  if (!out.length) out.push('RUB')
-  return out
-})
-
-// Валюта счёта по его id (для отнесения события к валютной дорожке остатка).
-function accountCurrency(accountId) {
-  const a = (state.accounts || []).find((x) => x.id === accountId)
-  return a ? a.currency : 'RUB'
-}
-
-// Мультивалютный таймлайн для режима "Все счета": объединяем perAccount-дорожки всех
-// счетов по датам, ведём отдельный нарастающий остаток на каждую валюту счёта. События
-// без счёта (карты, accountId=null) относим к рублёвой дорожке. Каждый day несёт:
-// { date, events, balances: {cur: остаток}, danger }.
-const allView = computed(() => {
-  const curs = accountCurrencies.value
-  // старт по валютам = сумма startingBalance счетов этой валюты (в её валюте)
-  const startBal = {}
-  const buffers = {}
-  for (const c of curs) { startBal[c] = 0; buffers[c] = 0 }
-  for (const a of state.accounts || []) {
-    if (a.disabled) continue
-    startBal[a.currency] += Number(a.startingBalance) || 0
-    buffers[a.currency] += Number(a.safetyBuffer) || 0
-  }
-  // собираем события по датам из общего таймлайна (forecast.days), сохраняя порядок дат
-  const byDate = new Map()
-  for (const day of forecast.value.days) {
-    byDate.set(day.date.getTime(), { date: day.date, events: day.events })
-  }
-  const running = { ...startBal }
-  const days = []
-  for (const [, d] of byDate) {
-    let danger = false
-    for (const e of d.events) {
-      // валюта дорожки = валюта счёта записи; для карт (accountId null) - рубли
-      const cur = e.accountId ? accountCurrency(e.accountId) : 'RUB'
-      if (!(cur in running)) { running[cur] = startBal[cur] || 0; buffers[cur] = buffers[cur] || 0 }
-      // вклад в остаток - нативная сумма события, сведённая в валюту дорожки, со знаком
-      const nativeAmt = e.native ? (Number(e.native.amount) || 0) : Math.abs(e.amount)
-      const nativeCur = e.native ? (e.native.currency || 'RUB') : 'RUB'
-      const inCur = convert(nativeAmt, nativeCur, cur, rates.value)
-      running[cur] += e.amount >= 0 ? inCur : -inCur
-    }
-    const balances = {}
-    for (const c of Object.keys(running)) {
-      balances[c] = running[c]
-      if (running[c] < (buffers[c] || 0)) danger = true
-    }
-    days.push({ date: d.date, events: d.events, balances, danger })
-  }
-  return { days, startBal, buffers, currencies: Object.keys(running).length ? Object.keys(running) : curs }
-})
+// Мультивалютный таймлайн режима "Все счета" (чистая функция ядра): движения в родной
+// валюте, остатки раздельно по валютам счетов. day: { date, events, balances, danger }.
+const allView = computed(() => forecastByCurrency(state))
 
 // активная дорожка одиночного счёта (режим "Все счета" обрабатывается через allView)
 const view = computed(() => {
@@ -102,14 +44,12 @@ function evInAccount(e) {
 
 // Итог по концу периода в режиме "Все счета": по валютам + сведённый в рубли.
 const allEnd = computed(() => {
-  const last = allView.value.days.length ? allView.value.days[allView.value.days.length - 1].balances
-    : allView.value.startBal
-  const byCur = allView.value.currencies.map((c) => ({ currency: c, amount: last[c] ?? (allView.value.startBal[c] || 0) }))
+  const byCur = allView.value.currencies.map((c) => ({ currency: c, amount: allView.value.endByCur[c] ?? (allView.value.startByCur[c] || 0) }))
   const rub = byCur.reduce((s, b) => s + convert(b.amount, b.currency, 'RUB', rates.value), 0)
   return { byCur, rub }
 })
 const allStart = computed(() => {
-  const byCur = allView.value.currencies.map((c) => ({ currency: c, amount: allView.value.startBal[c] || 0 }))
+  const byCur = allView.value.currencies.map((c) => ({ currency: c, amount: allView.value.startByCur[c] || 0 }))
   const rub = byCur.reduce((s, b) => s + convert(b.amount, b.currency, 'RUB', rates.value), 0)
   return { byCur, rub }
 })
