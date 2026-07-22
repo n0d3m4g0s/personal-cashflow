@@ -508,3 +508,22 @@ test('buildForecast: посчётный алерт на минус доллар�
   assert.equal(usdAlert.buffer, 0)
   assert.equal(usdAlert.shortfall, 200)
 })
+
+test('migrate: создаёт Основной счёт и проставляет accountId', async () => {
+  const { migrate } = await import('../src/store.js')
+  const s = migrate({
+    settings: { startingCash: { amount: 622500, currency: 'RUB' }, safetyBuffer: { amount: 50000, currency: 'RUB' } },
+    incomes: [{ id: 'i1', name: 'ЗП', amount: 100, currency: 'RUB', schedule: { frequency: 'once', startDate: '2026-07-25' } }],
+    expenses: [{ id: 'e1', name: 'Еда', amount: 50, currency: 'RUB', schedule: { frequency: 'once', startDate: '2026-07-25' } }],
+    loans: [{ id: 'l1', name: 'Кредит', amount: 10, currency: 'RUB', paymentDay: 10, remainingBalance: { amount: 0, currency: 'RUB' } }],
+    cards: [], goals: [], scenarios: [],
+  })
+  assert.ok(Array.isArray(s.accounts) && s.accounts.length >= 1)
+  const main = s.accounts[0]
+  assert.equal(main.currency, 'RUB')
+  assert.equal(main.startingBalance, 622500)
+  assert.equal(main.safetyBuffer, 50000)
+  assert.equal(s.incomes[0].accountId, main.id)
+  assert.equal(s.expenses[0].accountId, main.id)
+  assert.equal(s.loans[0].accountId, main.id)
+})

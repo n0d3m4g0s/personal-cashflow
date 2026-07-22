@@ -49,7 +49,7 @@ export function migrateCard(card, from = today()) {
 }
 
 // Гарантируем наличие ключевых полей (на случай старых сохранений).
-function migrate(s) {
+export function migrate(s) {
   s.settings = s.settings || {}
   s.settings.rates = { ...DEFAULT_RATES, ...(s.settings.rates || {}) }
   s.settings.startingCash = s.settings.startingCash || { amount: 0, currency: 'RUB' }
@@ -60,6 +60,35 @@ function migrate(s) {
     if (!Array.isArray(s[k])) s[k] = []
   }
   s.cards = (s.cards || []).map((c) => migrateCard(c))
+
+  // Счета: гарантируем минимум один "Основной" RUB со стартовым капиталом из settings.
+  if (!Array.isArray(s.accounts)) s.accounts = []
+  if (s.accounts.length === 0) {
+    const startAmt = Number(s.settings.startingCash?.amount) || 0
+    const bufAmt = Number(s.settings.safetyBuffer?.amount) || 0
+    s.accounts.push({
+      id: newId('acc'), name: 'Основной', currency: 'RUB',
+      startingBalance: startAmt, safetyBuffer: bufAmt, note: '', disabled: false,
+    })
+  }
+  // нормализация полей счёта (на случай частичных данных)
+  s.accounts = s.accounts.map((a) => ({
+    id: a.id || newId('acc'),
+    name: a.name || 'Счёт',
+    currency: a.currency || 'RUB',
+    startingBalance: Number(a.startingBalance) || 0,
+    safetyBuffer: Number(a.safetyBuffer) || 0,
+    note: a.note || '',
+    disabled: !!a.disabled,
+  }))
+  // Записи без accountId привязываем к первому счёту.
+  const mainId = s.accounts[0].id
+  for (const k of ['incomes', 'expenses', 'loans']) {
+    for (const rec of s[k]) {
+      if (rec.accountId == null) rec.accountId = mainId
+    }
+  }
+
   return s
 }
 
@@ -93,6 +122,7 @@ function collectionFor(kind) {
     loan: state.loans,
     card: state.cards,
     goal: state.goals,
+    account: state.accounts,
   }[kind]
 }
 
@@ -107,6 +137,12 @@ export function removeItem(kind, id) {
   const list = collectionFor(kind)
   const i = list.findIndex((x) => x.id === id)
   if (i >= 0) list.splice(i, 1)
+  if (kind === 'account') {
+    // записи, ссылавшиеся на удалённый счёт, становятся "без счёта"
+    for (const k of ['incomes', 'expenses', 'loans']) {
+      for (const rec of state[k]) if (rec.accountId === id) rec.accountId = null
+    }
+  }
 }
 
 export function duplicateItem(kind, id) {
@@ -149,7 +185,7 @@ export function clearAll() {
       rates: { ...DEFAULT_RATES },
       baseCurrency: 'RUB',
     },
-    incomes: [], expenses: [], loans: [], cards: [], goals: [], scenarios: [],
+    incomes: [], expenses: [], loans: [], cards: [], goals: [], scenarios: [], accounts: [],
   }
   for (const key of Object.keys(state)) delete state[key]
   Object.assign(state, empty)
