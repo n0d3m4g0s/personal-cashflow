@@ -16,7 +16,7 @@ function todayISO() {
 }
 const editing = ref(null)
 function blank() {
-  return { name: '', category: 'Прочее', owner: 'family', amount: 0, currency: 'RUB',
+  return { name: '', category: 'Прочее', owner: 'family', amount: 0, currency: 'RUB', accountId: state.accounts[0]?.id ?? null,
     schedule: { frequency: 'monthly', interval: 1, startDate: todayISO(), endDate: null }, disabled: false, note: '' }
 }
 function openNew() { editing.value = blank() }
@@ -98,6 +98,11 @@ const categories = computed(() => [...new Set(state.expenses.map((x) => x.catego
           <div style="flex: 1"><label>Кто</label>
             <select v-model="editing.owner"><option v-for="o in OWNERS" :key="o.value" :value="o.value">{{ o.label }}</option></select>
           </div>
+          <div style="flex: 1"><label>Счёт</label>
+            <select v-model="editing.accountId"><option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ a.currency }})</option></select>
+          </div>
+        </div>
+        <div class="row">
           <div style="flex: 2"><label>Сумма</label>
             <MoneyInput :model-value="{ amount: editing.amount, currency: editing.currency }"
                         @update:model-value="v => { editing.amount = v.amount; editing.currency = v.currency }" />

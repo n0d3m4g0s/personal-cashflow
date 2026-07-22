@@ -10,7 +10,7 @@ const OWNERS = [{ value: 'husband', label: 'Муж' }, { value: 'wife', label: '
 
 const editing = ref(null)
 function blank() {
-  return { name: '', owner: 'husband', amount: 0, currency: 'RUB', paymentDay: 10, remainingBalance: { amount: 0, currency: 'RUB' }, disabled: false, note: '' }
+  return { name: '', owner: 'husband', accountId: state.accounts[0]?.id ?? null, amount: 0, currency: 'RUB', paymentDay: 10, remainingBalance: { amount: 0, currency: 'RUB' }, disabled: false, note: '' }
 }
 function openNew() { editing.value = blank() }
 function openEdit(l) { editing.value = JSON.parse(JSON.stringify(l)) }
@@ -68,6 +68,9 @@ const totalMonthly = computed(() => state.loans.filter((l) => !l.disabled).reduc
         <div class="row">
           <div style="flex: 1"><label>Владелец</label>
             <select v-model="editing.owner"><option v-for="o in OWNERS" :key="o.value" :value="o.value">{{ o.label }}</option></select>
+          </div>
+          <div style="flex: 1"><label>Счёт списания</label>
+            <select v-model="editing.accountId"><option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ a.currency }})</option></select>
           </div>
           <div style="flex: 1"><label>День платежа</label><input type="number" min="1" max="31" v-model.number="editing.paymentDay" /></div>
         </div>
