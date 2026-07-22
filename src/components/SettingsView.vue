@@ -1,8 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { state, exportJSON, importJSON, resetToSeed, clearAll } from '../store.js'
-import { CURRENCIES, CURRENCY_META, formatMoney, fromRub } from '../money.js'
-import MoneyInput from './MoneyInput.vue'
+import { formatMoney, fromRub } from '../money.js'
 
 const rates = computed(() => state.settings.rates)
 const importText = ref('')
@@ -53,10 +52,9 @@ const rubPerUsd = computed({
 
     <section class="card grid" style="gap: 14px">
       <h2 style="margin: 0">Параметры прогноза</h2>
-      <div class="row">
-        <div style="flex: 1 1 220px"><label>Текущий остаток денег (старт прогноза)</label><MoneyInput v-model="state.settings.startingCash" /></div>
-        <div style="flex: 1 1 220px"><label>Безопасный буфер (не опускаться ниже)</label><MoneyInput v-model="state.settings.safetyBuffer" /></div>
-      </div>
+      <p class="small muted" style="margin: -6px 0 0">
+        Стартовый остаток и буфер теперь задаются по каждому счёту на вкладке "Счета".
+      </p>
       <div style="max-width: 240px">
         <label>Горизонт прогноза (мес.)</label>
         <select v-model.number="state.settings.horizonMonths">
