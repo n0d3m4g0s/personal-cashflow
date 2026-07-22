@@ -12,6 +12,7 @@ import IncomeView from './components/IncomeView.vue'
 import ExpensesView from './components/ExpensesView.vue'
 import SettingsView from './components/SettingsView.vue'
 import ScenariosView from './components/ScenariosView.vue'
+import AccountsView from './components/AccountsView.vue'
 
 const tabs = [
   { key: 'dashboard', label: 'Дашборд', icon: '📊', comp: Dashboard },
@@ -21,6 +22,7 @@ const tabs = [
   { key: 'cards', label: 'Кредитки', icon: '💳', comp: CardsView },
   { key: 'cardStrategy', label: 'Стратегия', icon: '🧮', comp: CardStrategyView },
   { key: 'loans', label: 'Кредиты', icon: '🏦', comp: LoansView },
+  { key: 'accounts', label: 'Счета', icon: '👛', comp: AccountsView },
   { key: 'income', label: 'Доходы', icon: '💰', comp: IncomeView },
   { key: 'expenses', label: 'Расходы', icon: '🧾', comp: ExpensesView },
   { key: 'settings', label: 'Настройки', icon: '⚙️', comp: SettingsView },
