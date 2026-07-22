@@ -1,6 +1,6 @@
 // Оптимизатор-советник: правила-эвристики → ранжированные рекомендации по картам.
 // Слой поверх ядра (finance.js) и движка сценариев (scenarios.js). Не мутирует state.
-import { buildForecast, buildMonthly, cardDebt, fmtISO, fmtHuman, addDays } from './finance.js'
+import { buildForecast, buildMonthly, cardDebt, fmtISO, fmtHuman, addDays, accountsBuffer } from './finance.js'
 import { transferCost } from './scenarios.js'
 import { moneyToRub } from './money.js'
 
@@ -37,7 +37,7 @@ export function cardAdvice(state, opts = {}) {
   const out = []
 
   // Правило 1 (critical): кассовый разрыв к дате card-события (платёж по карте).
-  const buffer = moneyToRub(state.settings.safetyBuffer, rates)
+  const buffer = accountsBuffer(state, rates)
   for (const day of forecast.days) {
     const cardEv = day.events.find((e) => e.kind === 'card')
     if (!cardEv) continue

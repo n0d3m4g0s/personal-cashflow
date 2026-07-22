@@ -1,6 +1,6 @@
 // Движок сценариев: ход (move) → форк состояния → готовый buildForecast.
 // Чистые функции, тестируется отдельно. finance.js не трогаем.
-import { parseDate, fmtISO, addDays, buildForecast } from './finance.js'
+import { parseDate, fmtISO, addDays, buildForecast, accountsStartingCash, accountsBuffer } from './finance.js'
 import { moneyToRub, convert } from './money.js'
 
 let _sid = 0
@@ -234,8 +234,8 @@ function applyMove(s, move) {
 export function evaluateScenario(state, scenario, opts = {}) {
   const rates = state.settings.rates
   const from = opts.from || scenario.baseFrom || fmtISO(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()))
-  const startingCash = moneyToRub(state.settings.startingCash, rates)
-  const buffer = moneyToRub(state.settings.safetyBuffer, rates)
+  const startingCash = accountsStartingCash(state, rates)
+  const buffer = accountsBuffer(state, rates)
 
   const forked = applyScenario(state, scenario)
   const cardLoans = (scenario.moves || []).filter((m) => m.type === 'cardLoan')

@@ -500,3 +500,58 @@ test('evaluateScenario: нереализуемая карусель добавл
   assert.ok(res.metrics.transferWarnings.length > 0, 'предупреждение о нереализуемой карусели')
   assert.equal(res.metrics.carouselSaved, 0, 'без реализуемости экономии нет')
 })
+
+test('evaluateScenario: breakEvenDate и risk считаются от суммы счетов, а не от устаревшего settings.startingCash', () => {
+  const rates = { amdPerRub: 4.6, usdPerRub: 0.0125 }
+  const st = {
+    settings: {
+      rates,
+      // Устаревшие settings: намеренно ниже фактической суммы счетов - источником истины
+      // теперь являются accounts[], а не эти поля (они только для обратной совместимости).
+      startingCash: { amount: 100000, currency: 'RUB' },
+      safetyBuffer: { amount: 10000, currency: 'RUB' },
+      horizonMonths: 3,
+    },
+    accounts: [
+      { id: 'acc1', name: 'Основной', currency: 'RUB', startingBalance: 100000, safetyBuffer: 50000 },
+      { id: 'acc2', name: 'Второй', currency: 'RUB', startingBalance: 200000, safetyBuffer: 50000 },
+    ],
+    incomes: [], expenses: [], loans: [], cards: [], goals: [], scenarios: [],
+  }
+  // Пустой сценарий без ходов: баланс не меняется, поэтому day.balance сразу равен
+  // стартовому остатку. Если считать от settings.startingCash (100000), breakEven сработает
+  // мгновенно на первом дне с событием (или раньше некорректно). Если правильно - от суммы
+  // счетов (300000) - тоже сработает на первом дне, т.к. баланс не падает ниже старта.
+  // Различие проявляется через buffer: risk должен считаться от суммы буферов счетов (100000),
+  // а не от settings.safetyBuffer (10000).
+  const scenario = { id: 'acc-sum', name: 'Расход', baseFrom: '2026-07-18', moves: [
+    { type: 'adjust', title: 'Крупный расход', amount: { amount: 250000, currency: 'RUB' }, sign: -1, date: '2026-07-20' },
+  ] }
+  const { metrics } = evaluateScenario(st, scenario, { from: '2026-07-18' })
+  // После расхода 250000 от стартовых 300000 (сумма счетов) остаток = 50000.
+  // От устаревшего settings.startingCash (100000) остаток после расхода был бы -150000
+  // (глубокий минус) - минимальный баланс движка не зависит от startingCash напрямую
+  // (buildForecast уже верно берёт сумму счетов), поэтому здесь минимальный остаток = 50000
+  // независимо от бага. Баг проявляется в buffer: 50000 < settings.safetyBuffer (10000)? нет -
+  // возьмём buffer от суммы счетов (100000): 50000 < 100000 -> risk 'средний'.
+  // От устаревшего settings.safetyBuffer (10000): 50000 >= 10000 -> risk был бы 'низкий'.
+  assert.equal(metrics.minBalance, 50000)
+  assert.equal(metrics.risk, 'средний',
+    `risk должен считаться от буфера счетов (100000), а не settings.safetyBuffer (10000); получили ${metrics.risk}`)
+
+  // breakEvenDate: проверяем через ход, который временно проседает ниже старта, а затем
+  // возвращается выше СУММЫ СЧЕТОВ (300000), но остаётся ниже устаревшего settings (100000)
+  // невозможно одновременно (300000 > 100000), поэтому проверяем обратный случай -
+  // возврат выше 100000, но НИЖЕ 300000: если баг присутствует, breakEven сработает
+  // на этом дне (ложно-рано); если исправлено - breakEven не сработает вовсе (null),
+  // т.к. баланс так и не достиг фактического старта 300000.
+  const scenario2 = { id: 'acc-sum-2', name: 'Расход и доход', baseFrom: '2026-07-18', moves: [
+    { type: 'adjust', title: 'Крупный расход', amount: { amount: 250000, currency: 'RUB' }, sign: -1, date: '2026-07-20' },
+    { type: 'adjust', title: 'Частичный доход', amount: { amount: 120000, currency: 'RUB' }, sign: 1, date: '2026-07-25' },
+  ] }
+  const res2 = evaluateScenario(st, scenario2, { from: '2026-07-18' })
+  // Баланс после 25.07: 300000 - 250000 + 120000 = 170000. Это больше устаревшего
+  // settings.startingCash (100000), но меньше фактической суммы счетов (300000).
+  assert.equal(res2.metrics.breakEvenDate, null,
+    'breakEvenDate не должен срабатывать, пока баланс не вернулся к фактической сумме счетов (300000)')
+})

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   expandSchedule, parseDate, monthlyFactor, addMonths,
   cardNextDue, buildForecast, computeGoals, fmtISO, diffDays, cardCycle, cardMinPayment, cardMinCore, cardDebt, buildMonthly,
-  cardPaymentSchedule, cardsSummary,
+  cardPaymentSchedule, cardsSummary, accountsStartingCash, accountsBuffer,
 } from '../src/finance.js'
 import { migrateCard } from '../src/store.js'
 
@@ -507,6 +507,66 @@ test('buildForecast: посчётный алерт на минус доллар�
   // остаток -200 USD при buffer=0 -> shortfall = buffer - balance = 0 - (-200) = 200
   assert.equal(usdAlert.buffer, 0)
   assert.equal(usdAlert.shortfall, 200)
+})
+
+test('accountsStartingCash: сумма стартовых остатков нескольких счетов в рублях', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = {
+    settings: { rates },
+    accounts: [
+      { id: 'a1', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 },
+      { id: 'a2', currency: 'USD', startingBalance: 500, safetyBuffer: 0 }, // 500/0.01 = 50000 руб
+    ],
+  }
+  assert.equal(accountsStartingCash(state, rates), 150000)
+})
+
+test('accountsStartingCash: disabled-счета не участвуют в сумме', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = {
+    settings: { rates },
+    accounts: [
+      { id: 'a1', currency: 'RUB', startingBalance: 100000, safetyBuffer: 0 },
+      { id: 'a2', currency: 'RUB', startingBalance: 999999, safetyBuffer: 0, disabled: true },
+    ],
+  }
+  assert.equal(accountsStartingCash(state, rates), 100000)
+})
+
+test('accountsStartingCash: без счетов - фолбэк на settings.startingCash', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = {
+    settings: { rates, startingCash: { amount: 500000, currency: 'RUB' } },
+    accounts: [],
+  }
+  assert.equal(accountsStartingCash(state, rates), 500000)
+})
+
+test('accountsStartingCash: accounts отсутствует (undefined) - тоже фолбэк', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = { settings: { rates, startingCash: { amount: 500000, currency: 'RUB' } } }
+  assert.equal(accountsStartingCash(state, rates), 500000)
+})
+
+test('accountsBuffer: сумма буферов нескольких счетов в рублях', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = {
+    settings: { rates },
+    accounts: [
+      { id: 'a1', currency: 'RUB', startingBalance: 0, safetyBuffer: 30000 },
+      { id: 'a2', currency: 'RUB', startingBalance: 0, safetyBuffer: 20000 },
+    ],
+  }
+  assert.equal(accountsBuffer(state, rates), 50000)
+})
+
+test('accountsBuffer: без счетов - фолбэк на settings.safetyBuffer', () => {
+  const rates = { amdPerRub: 4, usdPerRub: 0.01 }
+  const state = {
+    settings: { rates, safetyBuffer: { amount: 50000, currency: 'RUB' } },
+    accounts: [],
+  }
+  assert.equal(accountsBuffer(state, rates), 50000)
 })
 
 test('migrate: создаёт Основной счёт и проставляет accountId', async () => {

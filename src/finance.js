@@ -331,6 +331,29 @@ export function cardsSummary(state, opts = {}) {
   return { totalInterest, monthlyMin, totalDebt, debtInGrace, debtUnderInterest, totalFreeLimit, transferableFree, perCard }
 }
 
+// ---------- Счета ----------
+// Источник истины для стартового капитала и буфера безопасности - state.accounts[].
+// settings.startingCash/settings.safetyBuffer остались только для обратной совместимости
+// (фолбэк, когда счетов ещё нет).
+
+// Общий стартовый остаток (в рублях): сумма startingBalance по не-disabled счетам,
+// сведённых в рубли. Фолбэк на settings.startingCash, если счетов нет.
+export function accountsStartingCash(state, rates) {
+  const accounts = (state.accounts || []).filter((a) => !a.disabled)
+  if (accounts.length === 0) return moneyToRub(state.settings.startingCash, rates)
+  return accounts.reduce(
+    (s, a) => s + convert(Number(a.startingBalance) || 0, a.currency || 'RUB', 'RUB', rates), 0)
+}
+
+// Общий буфер безопасности (в рублях): сумма safetyBuffer по не-disabled счетам,
+// сведённых в рубли. Фолбэк на settings.safetyBuffer, если счетов нет.
+export function accountsBuffer(state, rates) {
+  const accounts = (state.accounts || []).filter((a) => !a.disabled)
+  if (accounts.length === 0) return moneyToRub(state.settings.safetyBuffer, rates)
+  return accounts.reduce(
+    (s, a) => s + convert(Number(a.safetyBuffer) || 0, a.currency || 'RUB', 'RUB', rates), 0)
+}
+
 // ---------- Движок прогноза ----------
 // Возвращает { events, days, alerts, monthly } — таймлайн с нарастающим остатком.
 
@@ -409,8 +432,7 @@ export function buildForecast(state, opts = {}) {
   // Нарастающий остаток
   // Общий стартовый остаток - сумма стартовых остатков счетов, сведённых в рубли.
   const accounts = (state.accounts || []).filter((a) => !a.disabled)
-  const startingCash = accounts.reduce(
-    (s, a) => s + convert(Number(a.startingBalance) || 0, a.currency || 'RUB', 'RUB', rates), 0)
+  const startingCash = accountsStartingCash(state, rates)
   let balance = startingCash
   const days = []
   const alerts = []
