@@ -48,7 +48,9 @@ export function makeSeed() {
     transferGraceEnabled: true, transferFeePercent: 2.9, transferFeeFixed: 290,
   })
 
-  return {
+  const mainAccountId = id('acc')
+
+  const seed = {
     version: 1,
     settings: {
       startingCash: { amount: 150000, currency: 'RUB' },
@@ -57,6 +59,11 @@ export function makeSeed() {
       rates: { ...DEFAULT_RATES },
       baseCurrency: 'RUB',
     },
+
+    // ---- Счета ----
+    accounts: [
+      { id: mainAccountId, name: 'Основной', currency: 'RUB', startingBalance: 150000, safetyBuffer: 50000, note: '', disabled: false },
+    ],
 
     // ---- Доходы ----
     incomes: [
@@ -166,6 +173,12 @@ export function makeSeed() {
       },
     ],
   }
+
+  // единый дефолтный счёт для всех сид-записей
+  for (const k of ['incomes', 'expenses', 'loans']) {
+    for (const rec of seed[k]) rec.accountId = mainAccountId
+  }
+  return seed
 }
 
 function card(name, bank, owner, o) {
