@@ -124,6 +124,22 @@ expenses/settings), переключение через `<component :is>`. Ак�
 props/эмиты не пробрасываются сверху. Стили — один глобальный `src/styles.css` с
 CSS-переменными (`--accent`, `--panel`, `--border`, `--muted`) плюс scoped-стили в SFC.
 
+## Спецификации (OpenSpec)
+
+Актуальная спецификация поведения - `openspec/specs/`: 10 capability-спек,
+выверенных по коду (money-multicurrency, schedule-recurrence, forecast-engine,
+credit-cards, card-transfers, accounts, goals, scenarios, card-advice, app-shell).
+Проектный контекст и правила артефактов - `openspec/config.yaml`.
+
+Новое изменение заводить через `openspec new change`, delta-спеки складывать в
+`openspec/changes/<name>/specs/`, после реализации сливать в основные спеки
+(`openspec archive` или `/openspec-sync-specs`). Проверка - `openspec validate --specs`.
+
+`docs/superpowers/` - история до перехода на OpenSpec, не источник истины; при
+расхождении прав `openspec/specs/`. Спеки описывают и известные нестыковки в коде
+(например, `forecast.buffer` из `settings`, тогда как алерты считаются по буферу
+счёта) - они зафиксированы осознанно, не "чини" их не разобравшись.
+
 ## Соглашения
 
 - Комментарии и весь UI-текст на русском. Прямые кавычки `"..."`, без длинных/средних тире
